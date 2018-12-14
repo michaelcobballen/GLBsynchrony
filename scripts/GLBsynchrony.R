@@ -9,6 +9,7 @@ library(maptools)
 library(mapmisc)
 library(sgeostat)
 library(psych)
+library(dplyr)
 
 # read in data
 dstate=read.csv("data/dstate.csv")
@@ -63,7 +64,9 @@ gcordist = merge(g.cor,dstate,by='pairid',all.x=T); head(gcordist); nrow(gcordis
 colnames(gcordist)[c(2,3)] <- c("state1","state2"); head(gcordist)
 gcordist = gcordist[,c("pairid","state1","state2","cor","pval","dist")]; head(gcordist)
 gcordist$sig = ifelse(gcordist$pval<0.05,"Y","N"); head(gcordist)
-
+### delete duplicate state pairs
+gcordist = distinct(gcordist, cor, .keep_all = TRUE)
+nrow(gcordist); head(gcordist)
 #remove three states with very low populations
 gcordist= subset(gcordist,!(state1 %in% c("CT","MS","NH")) & !(state2 %in% c("CT","MS","NH")))
 
@@ -72,7 +75,7 @@ X11(13,9)
 ggplot(subset(gcordist,!(state1 %in% c("CT","MS","NH")) & !(state2 %in% c("CT","MS","NH")))) + 
   geom_point(aes(x=dist,y=cor,color=sig),size=4) + 
   geom_smooth(aes(x=dist,y=cor),method="lm",color="black") 
-#ggsave("GRSP_cor_1966-2015.png")
+#ggsave("GRSP_cor_1966-2015a.png")
 
 # with significant pairs labeled
 ggplot(subset(gcordist,!(state1 %in% c("CT","MS","NH")) & !(state2 %in% c("CT","MS","NH")))) + 
@@ -80,43 +83,27 @@ ggplot(subset(gcordist,!(state1 %in% c("CT","MS","NH")) & !(state2 %in% c("CT","
   geom_smooth(aes(x=dist,y=cor),method="lm",color="black") +
   geom_label(data=subset(gcordist,sig=="Y"),aes(x=dist,y=cor,label=pairid))
 
-###
-### NOTE PAIRS ARE IN DUPLICATE AT THE MOMENT.  FIGURE OUT HOW TO REMOVE LATER!!!!
-### % SIGNIFICANT IN BINS WILL NOT CHANGE, BUT SAMPLE SIZE IS 1/2 OF WHAT IT APPEARS
 
-###### plotting % signficant by distance bins 
+
+###### plotting % signficant by distance1 bins 
 # (to improve: put distance bin into dstate.csv to make easier to switch spp)
 
 # create 200m bins
-binlabels1=c("100-200","201-400","401-600","601-800","801-1000",
-                   "1001-1200","1201-1400","1401-1600","1601-1800","1801-2000")
-binlabels2=c("100-200","201-300","301-400","401-500","501-600","601-700",
-             "701-800","801-900","901-1000",">1000")
-binlabels3=c("100-300","301-500","501-700","701-900","901-1100","1101-1300",
+
+binlabels=c("100-300","301-500","501-700","701-900","901-1100","1101-1300",
              "1301-1500",">1500")
-gcordist$dcat1=cut(gcordist$dist,c(0,200,400,600,800,1000,1200,1400,1600,1800,2000),
-    labels=binlabels1)
-gcordist$dcat2=cut(gcordist$dist,c(0,200,300,400,500,600,700,800,900,1000,2000),
-                   labels=binlabels2)
-gcordist$dcat3=cut(gcordist$dist,c(0,300,500,700,900,1100,1300,1500,2000),
-                   labels=binlabels3)
+
+gcordist$dcat=cut(gcordist$dist,c(0,300,500,700,900,1100,1300,1500,2000),
+                   labels=binlabels)
 gcordist$sig1=ifelse(gcordist$sig=="Y",1,0)
 head(gcordist)
 
-gbin1 = cbind.data.frame(pctsig=100*tapply(gcordist$sig1,gcordist$dcat1,mean),
-      n=tapply(gcordist$sig1,gcordist$dcat1,length))
-gbin1$bin=factor(rownames(gbin1),levels=binlabels1); gbin1
-
-gbin2 = cbind.data.frame(pctsig=100*tapply(gcordist$sig1,gcordist$dcat2,mean),
-      n=tapply(gcordist$sig1,gcordist$dcat2,length))
-gbin2$bin=factor(rownames(gbin2),levels=binlabels2); gbin2
-
-gbin3 = cbind.data.frame(pctsig=100*tapply(gcordist$sig1,gcordist$dcat3,mean),
-      n=tapply(gcordist$sig1,gcordist$dcat3,length))
-gbin3$bin=factor(rownames(gbin3),levels=binlabels3); gbin3
+gbin = cbind.data.frame(pctsig=100*tapply(gcordist$sig1,gcordist$dcat,mean),
+      n=tapply(gcordist$sig1,gcordist$dcat,length))
+gbin$bin=factor(rownames(gbin),levels=binlabels); gbin
 
 x11(13,8.5)
-ggplot(gbin3) + geom_col(aes(y=pctsig,x=bin)) + labs(x="distance (km)",y="% signifcant correlations")
+ggplot(gbin) + geom_col(aes(y=pctsig,x=bin)) + labs(x="distance (km)",y="% signifcant correlations")
 #ggsave("GRSP_bincor_1966-2015.png")
 
 
@@ -125,7 +112,7 @@ ggplot(gbin3) + geom_col(aes(y=pctsig,x=bin)) + labs(x="distance (km)",y="% sign
 
 
 
-# nex: correlate with distance and repeat for historic vs. recent periods
+# nex: repeat for historic vs. recent periods
 # note: try correlating average cor with yield? avg growth rate?
 # do it separately for early and late period
 #write.csv(data.frame(tapply(ggall$cor,ggall$state2,mean)),"grsp.mean.cor.1967-2015.csv") # changed name of gg above to get early and late

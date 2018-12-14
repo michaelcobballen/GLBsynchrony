@@ -11,8 +11,8 @@ library(sgeostat)
 library(psych)
 
 # read in data
-dstate=read.csv("dstate.csv")
-bbs=read.csv("BBS_Annual_Indices_Estimates_2015_7-29-2016.csv") # read in BBS data
+dstate=read.csv("data/dstate.csv")
+bbs=read.csv("data/BBS_Annual_Indices_Estimates_2015_7-29-2016.csv") # read in BBS data
 colnames(bbs)<-c("sp","state","year","ind","cred")
 head(bbs)
 

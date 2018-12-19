@@ -21,7 +21,7 @@ g=subset(bbs,sp=="s05460"); head(g)
 levels(bbs$state)
 gg=subset(g,state %in% c("CON", "NH ", "MIS", "NY ","PA ","NJ ","DEL","MD ","WV ",
                          "VA ","NC ","KY ","TEN", "OHI", "IND", "ILL","MIC", 
-                         "ALA", "GA ", "SC ", "WIS")) # 
+                         "ALA", "GA ", "SC ", "WIS", "MAS", "RI ", "VT ","ME ")) # 
 
 
 head(gg); tail(gg)
@@ -62,7 +62,7 @@ head(dstate); nrow(dstate)
 
 gcordist = merge(g.cor,dstate,by='pairid',all.x=T); head(gcordist); nrow(gcordist)
 colnames(gcordist)[c(2,3)] <- c("state1","state2"); head(gcordist)
-gcordist = gcordist[,c("pairid","state1","state2","cor","pval","dist")]; head(gcordist)
+gcordist = gcordist[,c("pairid","state1","state2","cor","pval","dist","dcat")]; head(gcordist)
 gcordist$sig = ifelse(gcordist$pval<0.05,"Y","N"); head(gcordist)
 ### delete duplicate state pairs
 gcordist = distinct(gcordist, cor, .keep_all = TRUE)
@@ -82,7 +82,6 @@ ggplot(subset(gcordist,!(state1 %in% c("CT","MS","NH")) & !(state2 %in% c("CT","
   geom_point(aes(x=dist,y=cor,color=sig),size=4) + 
   geom_smooth(aes(x=dist,y=cor),method="lm",color="black") +
   geom_label(data=subset(gcordist,sig=="Y"),aes(x=dist,y=cor,label=pairid))
-
 
 
 ###### plotting % signficant by distance1 bins 
@@ -111,6 +110,9 @@ ggplot(gbin) + geom_col(aes(y=pctsig,x=bin)) + labs(x="distance (km)",y="% signi
 ## to test spatial extent of synchrony
 
 
+## mapping average local synchrony
+aggregate(subset(gcordist,dist<500)$cor,list(subset(gcordist,dist<500)$state1),mean)
+aggregate(subset(gcordist,dist<500)$cor,list(subset(gcordist,dist<500)$state1),length)
 
 # nex: repeat for historic vs. recent periods
 # note: try correlating average cor with yield? avg growth rate?

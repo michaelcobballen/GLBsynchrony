@@ -310,5 +310,6 @@ mean.synch.map %>%
          main = "GRSP Synchrony w/in 500 km, 1966-2015", col="transparent")
          
 
-
+# NEXT: REPEAT FOR 3 DIFF TIME STEPS (1966-1981, 1981-1996, 1997-2015), AND PUT
+# AND PUT LOESS LINES ON THE SAME GRAPH
        

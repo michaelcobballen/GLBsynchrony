@@ -1,42 +1,134 @@
-### THIS CODE IS FOR CALCULATING PAIRWISE 'SYNCHRONY' (CROSS-CORRELATION) 
-### AMONG DETRENDED HAY YIELD (TONS/ACRE/YEAR ) IN US STATES (USDA NASS DATA)
-### FOR NOW I AM ONLY USING YIELD DATA AT THE STATE LEVEL
-### CODE COULD BE MODIFIED FOR OTHER SPATIAL, 'TREND-STATIONARY' TIME SERIES
-### SOME DAY I WILL ALSO MAKE A SCRIPT FOR EXAMINING SYNCHRONY AT THE COUNTY LEVEL
+### THIS CODE IS FOR CALCULATING RELATIONSHIP BETWEEN DETRENDED HAY YIELD (TONS/ACRE/YEAR; USDA NASS DATA) 
+### AND GRASSLAND BIRD POPULATION GROWTH RATE (BREEDING BIRD SURVEY) IN US STATES 
+### STATE-LEVEL DATA FOR NOW; COULD BE DONE AT ~COUNTY AND ROUTE-LEVEL
 
 library(ggplot2)
 library(dplyr)
 library(tidyr)
+library(psych)
+library(cowplot)
+library(RColorBrewer)
 library(rgdal)
 library(sp)
-library(psych)
-#library(cowplot)
-library(RColorBrewer)
+library(broom)
+library(geofacet)
 
-### SET YEAR RANGE
-yearstart = 1952
-yearend = 1972
+### READ IN AND PROCESS DATA
 
-
-### READ IN DATA
-h = subset(read.csv("data/AllHay_Yield_survey_allstates.csv"),Period=="YEAR"); head(h) # 5241
-dstate = read.csv("data/dstate.csv")
 # census shapefile for US states and territories
 states <- readOGR("data/cb_2014_us_state_5m.shp")
 # downloaded from: https://www2.census.gov/geo/tiger/GENZ2014/shp/cb_2014_us_state_5m.zip
 states.latlong = spTransform(states,CRS("+proj=longlat +datum=WGS84"))
+# make a look-up table used to join tables based on state codes
+states.lookup = 
+  data.frame(states@data) %>%
+  rename(state = STUSPS) %>%
+  mutate(State.ANSI = as.numeric(as.character(STATEFP)))
 
-### A FUNCTION TO GENERATE PAIRWISE CORRELATIONS IN DETRENDED YIELD AMONG STATES
-### FOR A GIVEN RANGE OF YEARS
-yldsynch = function(yearstart, yearend) {
+# Breeding Bird Survey data (annual state-level population index)
+bbs = read.csv("data/BBS_Annual_Indices_Estimates_2015_7-29-2016.csv") # read in BBS data
+colnames(bbs)<-c("sp","state","year","ind","cred") # rename columns
+#rename region codes to match state abbreviations
+levels(bbs$state)=c("AL","CAN","AZ","AR","CAN","CA","X","X","CO","CT", "DE", "X", "FL", "GA", "IA",
+                    "ID", "IL", "IN", "KS", "KY", "LA", "CAN", "MA", "MD", "ME", "MI", "MN", "MS", 
+                    "MO", "MT", "CAN", "NC", "ND", "NE", "NV", "NH", "NJ", "NM", "CAN", "NY", "OH",
+                    "OK", "CAN", "OR", "PA", "CAN", "CAN", "RI", "X", "X", "X", "X", "X", "X", "X",
+                    "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "X",
+                    "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "CAN", "SC", "SD", "X", "TN", 
+                    "TX", "X", "UT", "VA", "VT", "WA", "X", "WI", "WV", "WY")
 
-### detrend yield data by regressing against year (within state)
+# filtering and joining BBS data to state code data; creating "population growth rate" (r) variable
+### TO CHANGE SPECIES AND YEARS, ALTER THE CODE IN THE "filter" COMMAND HERE
+# (for now: look up species codes on BBS website and change the sp=="" to desired species)
+# create "statelagyear" variable to join with yield data in the proper time lag structure (see below)
+bird =
+  bbs %>%
+  filter(sp=="s05460" & state!= "X" & state != "CAN" & year>1965 & year<2016) %>%
+  arrange(state,year) %>%
+  mutate(r = ifelse(year==1966,NA,100*c(NA,diff(ind))/lag(ind))) %>%
+  left_join(states.lookup, by = "state") %>%
+  select(sp, state, year, ind,cred, r, State.ANSI = STATEFP, name = NAME) %>%
+  mutate(statelagyear = paste(state,year,sep=""))
+bird=droplevels(bird)
+
+# Hay yield data for US states from USDA NASS ('all hay') in tons / acre
+yld = read.csv("data/AllHay_Yield_survey_allstates.csv")
+# filtering data and joining with state code data
+# creating detrended yield variable (ryld) by regressing against year (within states)
+# subsetted 1966-2014 to relate "lag 1" yield with "lag 0" population growth rate  
+
+### SOMETHING IS TERRIBLY WRONG WITH DETR.YLD RIGHT NOW!!!!
+# a joining problem
+# fix states.lookup
 detr.yld = 
-  h %>% 
-  filter(Year > yearstart - 1 & Year < yearend+1 & State !="ALASKA") %>%
-  # exclude Alaska because no data (not a state) before 1959
+  yld %>% 
+  filter(Year>1965 & Year<2015 & Period=="YEAR") %>%
   group_by(State) %>%
-  mutate(ryld = resid(lm(Value~Year)))
+  mutate(ryld = resid(lm(Value~Year))) %>%
+  arrange(State,Year) %>%
+  select(State,State.ANSI,Year,Value,ryld)
+
+detr.yld = 
+  detr.yld %>%
+  left_join(states.lookup, by = "State.ANSI") %>%
+  select(State, state, year = Year, yield = Value, ryld, State.ANSI = STATEFP, name = NAME) %>%
+  mutate(lagyear = year + 1, statelagyear = paste(state,lagyear,sep=""), State.ANSI = as.numeric(State.ANSI))
+
+# joining the bird data with the yield data (lagged 1 year)
+
+r.ryld = 
+  left_join(bird,detr.yld,by = "statelagyear") %>%
+  select(sp,State, state = state.x, ansi = State.ANSI.x, name = name.x, 
+         yearbird = year.x, yearyld = year.y,ind,r,yield.lag1 = yield,ryld.lag1 = ryld)
+
+
+# checking all time series data graphically: BBS index, growth rate, yield, and detrended yield
+
+#X11(26,18)
+ggplot(r.ryld) + 
+  geom_line(aes(x=yearbird,y=ind)) +
+  facet_geo(~state, scales = "free_y") +
+  theme_bw() +
+  xlab("Year") + ylab("BBS Index") +
+  theme(axis.text=element_text(size=3.25))
+#ggsave("figures/GRSP_all_states_BBSindex_US.png")
+
+#X11(26,18)
+ggplot(r.ryld) + 
+  geom_line(aes(x=yearbird,y=r,group=state)) +
+  facet_wrap(~state, scales = "free_y") +
+  theme_bw() +
+  xlab("Year") + ylab("BBS Index Growth Rate") +
+  theme(axis.text=element_text(size=5))
+#ggsave("figures/GRSP_all_states_r.png")
+
+#X11(26,18)
+ggplot(r.ryld) + 
+  geom_line(aes(x=yearyld,y=yield.lag1,group=state)) + 
+  geom_line(aes(x=yearyld,y=ryld.lag1)) +
+  facet_wrap(~state, scales = "free_y") +
+  theme_bw() + 
+  theme(axis.text=element_text(size=5))
+#ggsave("figures/YLD_all_states_detrended.png")
+
+
+# check average BBS index values to identify states with very low populations
+# working criteria: exclude states with mean index < 0.1 
+
+mean.index=data.frame(mean.index = tapply(bird$ind,bird$state,mean, na.rm=T))
+mean.index$state = rownames(mean.index)
+mean.index$exclude = ifelse(mean.index$mean.index < 0.1, "Y", "N")
+
+# calculate lm for r ~ ryld in each state
+# from: https://stackoverflow.com/questions/22713325/fitting-several-regression-models-with-dplyr
+head(all)
+allsimple = all %>% filter(is.na(r)!=T,is.na(ryld.lag1)!=T) %>% select(state,yearbird,r,ryld.lag1)
+allsimple
+allstate = allsimple %>% group_by(state) %>% do(fitstate = lm(r ~ ryld.lag1, na.action=na.exclude, data = .))
+
+(r.yld.lm = tidy(allstate, fitstate))
+
+
 
 # put data into a 'wide format' matrix, with a column for each state and row for each year
 yld.mat = 
@@ -45,11 +137,25 @@ yld.mat =
   spread(State,ryld)
 
 # name state columns by USPS postal abbreviations
-colnames(yld.mat) = c("year","AL","AZ","AR","CA","CO","CT","DE","FL","GA","ID","IL",
+colnames(yld.mat) = c("year","AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","ID","IL",
                      "IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT",
                      "NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI",
                      "SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY")
-yld.mat=yld.mat[,2:ncol(yld.mat)]
+
+yld.names = reshape2::melt(yld.mat[,2:ncol(yld.mat)])
+yld.names$year = rep(2016:1966,49); head(yld.names)
+
+ggplot(yld.names) + 
+  geom_line(aes(x=year,y=value)) +
+  facet_wrap(~variable, scales = "free_y") 
+# check this against the facet plot above to make sure it worked (years were in order)
+
+
+
+# progress ...
+
+
+
 
 # create matrix of Pearson correlations among states
 yld.test = 
@@ -77,95 +183,32 @@ nrow(yldcordist) == length(unique(yldcordist$cor))*2 # this tests that all value
   # if that returns "TRUE", then proceed (if not you need to find another way of removing duplicates)
 yldcordist = distinct(yldcordist, cor, .keep_all = TRUE); head(yldcordist); nrow(yldcordist)
 
-return(yldcordist)
-}
+## exclude Alaska and... 
+## make subsets of the two main geographic areas (east and west of the Mississippi River)
+yldcordist = filter(yldcordist, state1!="AK" & state2!="AK"); nrow(yldcordist)
+yldcordist.east = filter(yldcordist,reg=="east") # 325 rows
+  # cordist.east = droplevels(cordist.east)
+yldcordist.west = filter(yldcordist,reg=="west")
+  # cordist.west = droplevels(cordist.west) # 231 rows
 
-yldreg.66.15 = yldsynch(1966,2015) # this is for general plotting in period of BBS
-yldreg.09.30 = yldsynch(1909,1930)
-yldreg.31.51 = yldsynch(1931,1951)
-yldreg.52.72 = yldsynch(1952,1972)
-yldreg.73.94 = yldsynch(1973,1994)
-yldreg.95.16 = yldsynch(1995,2016)
-
-
-### FUCNTION TO PLOT ALL RAW AND DETRENDED YIELD TIME SERIES FOR ALL STATES TO VISUALLY CHECK STATIONARITY (CONSTANT MEAN AND VARIANCE OVER TIME)
-yldplot = function(yearstart, yearend){
-  detr.yld2 = 
-    h %>% 
-    filter(Year > yearstart - 1 & Year < yearend+1) %>%
-    group_by(State) %>%
-    mutate(ryld = resid(lm(Value~Year)))
-  ggplot(detr.yld2) + 
-    geom_line(aes(x=Year,y=Value)) + 
-    geom_line(aes(x=Year,y=ryld)) +
-    facet_wrap(~State, scales = "free_y") + 
-    theme_bw() +
-    labs(title = paste("Years: ",yearstart,"-",yearend,sep=""))
-}
-
-# plotting the time series using the yldplot function
-X11(26,18);(yldplot.09.16 = yldplot(1909,2016)) # entire 1909-2016 time series for fun - don't expect it to be linear
-X11(26,18);(yldplot.66.15 = yldplot(1966,2015)) # same period of the Breeding Bird Survey data
-X11(26,18);(yldplot.09.30 = yldplot(1909,1930))
-X11(26,18);(yldplot.31.51 = yldplot(1931,1951))
-X11(26,18);(yldplot.52.72 = yldplot(1952,1972))
-X11(26,18);(yldplot.73.94 = yldplot(1973,1994))
-X11(26,18);(yldplot.95.16 = yldplot(1995,2016))
-#ggsave("figures/YLD_all_states_detrended.png")
-
-# creating dataframe that has pairwise synchrony for each time period (in separate columns)
-yldtime = cbind.data.frame(all.09.30 = yldsynch(1909,1930), all.31.51 = yldsynch(1931,1951), 
-                     all.52.72 = yldsynch(1952,1972), all.73.94 = yldsynch(1973,1994),
-                      all.95.16 = yldsynch(1995,2016)) %>%
-    select(c(pairid=all.09.30.pairid,state1=all.09.30.state1,state2=all.09.30.state2,
-            dist=all.09.30.dist, dcat=all.09.30.dcat,reg=all.09.30.reg,
-                      all.09.30.cor,all.09.30.pval,all.09.30.sig,
-                      all.31.51.cor,all.31.51.pval,all.31.51.sig,
-                      all.52.72.cor,all.52.72.pval,all.52.72.sig,
-                      all.73.94.cor,all.73.94.pval,all.73.94.sig,
-                      all.95.16.cor,all.95.16.pval,all.95.16.sig))
+# to change geographic region plotted below:
+# change following code to cordist.east (for east), 
+# cordist.west (for west), 
+# or cordist (for all)
+yldreg = yldcordist.east
 
 
-### SCATTERPLOT OF SYNCHRONY VS. DISTANCE (FILTER BY REGION IF DESIRED)
-X11(13,9)
-ggplot(filter(yldtime,reg %in% c("east","west","both"))) + 
-  geom_point(aes(x=dist,y=all.31.51.cor,color=all.31.51.sig),size=4, alpha = 0.5) + 
-  geom_smooth(aes(x=dist,y=all.31.51.cor),method="loess",color="black")
-#ggsave("figures/YLD_cor_all_1931-1951.loess.png")
+### SCATTERPLOT OF SYNCHRONY VS. DISTANCE
+#X11(13,9)
+ggplot(yldreg) + 
+  geom_point(aes(x=dist,y=cor,color=sig),size=4) + 
+  geom_smooth(aes(x=dist,y=cor),method="loess",color="black") 
+#ggsave("figures/YLD_cor_all_1966-2015_loess.png")
 #ggsave("figures/YLD_cor_east_1966-2015.png")
 #ggsave("figures/YLD_cor_west_1966-2015.png")
 
-### below is an attempt to try plotting the above as a custom function, but it kept returning the same scatterplot
-#yldsynch.scatter = function(yearbegin,yearstop,region) {
-#  east = filter(yldsynch(yearbegin,yearstop), reg == "east")
-#  west = filter(yldsynch(yearbegin,yearstop), reg == "west")
-#  all = filter(yldsynch(yearbegin,yearstop), reg %in% c("east","west","both"))
-#ggplot(region) + 
-#  geom_point(aes(x=dist,y=cor,color=sig),size=4, alpha = 0.5) + 
-#  geom_smooth(aes(x=dist,y=cor),method="loess",color="black")
-#}
-#X11(13,9); (yldsynch.scatter.all.95.16 = yldsynch.scatter(1995,2016,all))
-#X11(13,9); (yldsynch.scatter.all.73.94 = yldsynch.scatter(1973,1994,all))
-
-
-### ALL LOESS LINES ON SAME GRAPH  (FILTER BY REGION IF DESIRED)
-## need to 'melt' yldtime so plot can be called with one geom_smooth and will have a legend
-X11(13,9)
-ggplot(filter(yldtime,reg %in% c("east","west","both"))) + 
-  geom_smooth(aes(x=dist,y=all.09.30.cor),method="loess", se = F, color="darkred") +
-  geom_smooth(aes(x=dist,y=all.31.51.cor),method="loess", se = F, color="darkblue") +
-  geom_smooth(aes(x=dist,y=all.52.72.cor),method="loess", se = F, color="orange") +
-  geom_smooth(aes(x=dist,y=all.73.94.cor),method="loess", se = F, color="purple") +
-  geom_smooth(aes(x=dist,y=all.95.16.cor),method="loess", se = F, color="yellow") +
-  labs(xlab="synchrony", ylab="distance")
-#ggsave("figures/YLD_cor_all_1909-2016.loess.png")
-
-
-
-
-
 # with significant pairs labeled
-ggplot(yldreg.66.15) + 
+ggplot(yldreg) + 
   geom_point(aes(x=dist,y=cor,color=sig),size=4) + 
   geom_smooth(aes(x=dist,y=cor),method="lm",color="black") +
   geom_label(data=subset(yldreg,sig=="Y"),aes(x=dist,y=cor,label=pairid))
@@ -191,6 +234,7 @@ ggplot(corbin) +
 
 ## NEXT: need to create n = 1000 null (random) distributions for each bin like Martin et al. 
 ## to test spatial extent of synchrony
+
 
 
 ##### MAPPING AVERAGE LOCAL SYNCHRONY (EAST ONLY FOR NOW)
@@ -346,5 +390,5 @@ yld.mean.synch.map %>%
          main = "Hay Yield Synchrony w/in 500 km, 1966-2015", col="transparent")
 
 
-# NEXT: REPEAT FOR 3 DIFF TIME STEPS (1965-1981, 1982-1998, 1999-2015), AND PUT
+# NEXT: REPEAT FOR 3 DIFF TIME STEPS (1966-1981, 1981-1996, 1997-2015), AND PUT
   # AND PUT LOESS LINES ON THE SAME GRAPH

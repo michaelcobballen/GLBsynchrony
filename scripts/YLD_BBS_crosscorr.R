@@ -25,6 +25,7 @@ states.lookup =
   rename(state = STUSPS) %>%
   mutate(State.ANSI = as.numeric(as.character(STATEFP)))
 
+
 # Breeding Bird Survey data (annual state-level population index)
 bbs = read.csv("data/BBS_Annual_Indices_Estimates_2015_7-29-2016.csv") # read in BBS data
 colnames(bbs)<-c("sp","state","year","ind","cred") # rename columns
@@ -37,38 +38,42 @@ levels(bbs$state)=c("AL","CAN","AZ","AR","CAN","CA","X","X","CO","CT", "DE", "X"
                     "X", "X", "X", "X", "X", "X", "X", "X", "X", "X", "CAN", "SC", "SD", "X", "TN", 
                     "TX", "X", "UT", "VA", "VT", "WA", "X", "WI", "WV", "WY")
 
+# Hay yield data for US states from USDA NASS ('all hay') in tons / acre
+yld = read.csv("data/AllHay_Yield_survey_allstates.csv")
+
+
+### Make a function to conduct bird r vs. yield regressions by state
+
+birdyldlm = function(spcode, birdyearstart,birdyearend) { 
+  # birdyearstart should be the year before the first pop change (r) value, e.g., 1966 when r starts at 1967
+  # use birdcode = s05460 for GRSP
+  # (for now: look up other species codes on BBS website and change the sp=="" to desired species)
 # filtering and joining BBS data to state code data; creating "population growth rate" (r) variable
-### TO CHANGE SPECIES AND YEARS, ALTER THE CODE IN THE "filter" COMMAND HERE
-# (for now: look up species codes on BBS website and change the sp=="" to desired species)
 # create "statelagyear" variable to join with yield data in the proper time lag structure (see below)
+
 bird =
   bbs %>%
-  filter(sp=="s05460" & state!= "X" & state != "CAN" & year>1965 & year<2016) %>%
+  filter(sp==spcode & state!= "X" & state != "CAN" & year > birdyearstart-1 & year < birdyearend+1) %>%
   arrange(state,year) %>%
-  mutate(r = ifelse(year==1966,NA,100*c(NA,diff(ind))/lag(ind))) %>%
+  mutate(r = ifelse(year==birdyearstart,NA,100*c(NA,diff(ind))/lag(ind))) %>%
   left_join(states.lookup, by = "state") %>%
   select(sp, state, year, ind,cred, r, State.ANSI = STATEFP, name = NAME) %>%
   mutate(statelagyear = paste(state,year,sep=""))
 bird=droplevels(bird)
 
-# Hay yield data for US states from USDA NASS ('all hay') in tons / acre
-yld = read.csv("data/AllHay_Yield_survey_allstates.csv")
 # filtering data and joining with state code data
 # creating detrended yield variable (ryld) by regressing against year (within states)
-# subsetted 1966-2014 to relate "lag 1" yield with "lag 0" population growth rate  
+# subsetted to relate "lag 1" yield with "lag 0" population growth rate  
 
-### SOMETHING IS TERRIBLY WRONG WITH DETR.YLD RIGHT NOW!!!!
-# a joining problem
-# fix states.lookup
 detr.yld = 
   yld %>% 
-  filter(Year>1965 & Year<2015 & Period=="YEAR") %>%
+  filter(Year > birdyearstart-1 & Year < birdyearend & Period=="YEAR") %>%
   group_by(State) %>%
   mutate(ryld = resid(lm(Value~Year))) %>%
   arrange(State,Year) %>%
   select(State,State.ANSI,Year,Value,ryld)
 
-detr.yld = 
+detr.yld2 = 
   detr.yld %>%
   left_join(states.lookup, by = "State.ANSI") %>%
   select(State, state, year = Year, yield = Value, ryld, State.ANSI = STATEFP, name = NAME) %>%
@@ -76,44 +81,12 @@ detr.yld =
 
 # joining the bird data with the yield data (lagged 1 year)
 
-r.ryld = 
-  left_join(bird,detr.yld,by = "statelagyear") %>%
-  select(sp,State, state = state.x, ansi = State.ANSI.x, name = name.x, 
+r.ryld1 = 
+  full_join(bird,detr.yld2,by = "statelagyear") %>%
+  select(stateyearbird = statelagyear, sp,State, state = state.x, ansi = State.ANSI.x, name = name.x, 
          yearbird = year.x, yearyld = year.y,ind,r,yield.lag1 = yield,ryld.lag1 = ryld)
 
-
-# checking all time series data graphically: BBS index, growth rate, yield, and detrended yield
-
-#X11(26,18)
-ggplot(r.ryld) + 
-  geom_line(aes(x=yearbird,y=ind)) +
-  facet_geo(~state, scales = "free_y") +
-  theme_bw() +
-  xlab("Year") + ylab("BBS Index") +
-  theme(axis.text=element_text(size=3.25))
-#ggsave("figures/GRSP_all_states_BBSindex_US.png")
-
-#X11(26,18)
-ggplot(r.ryld) + 
-  geom_line(aes(x=yearbird,y=r,group=state)) +
-  facet_wrap(~state, scales = "free_y") +
-  theme_bw() +
-  xlab("Year") + ylab("BBS Index Growth Rate") +
-  theme(axis.text=element_text(size=5))
-#ggsave("figures/GRSP_all_states_r.png")
-
-#X11(26,18)
-ggplot(r.ryld) + 
-  geom_line(aes(x=yearyld,y=yield.lag1,group=state)) + 
-  geom_line(aes(x=yearyld,y=ryld.lag1)) +
-  facet_wrap(~state, scales = "free_y") +
-  theme_bw() + 
-  theme(axis.text=element_text(size=5))
-#ggsave("figures/YLD_all_states_detrended.png")
-
-
-# check average BBS index values to identify states with very low populations
-# working criteria: exclude states with mean index < 0.1 
+# check average BBS index values to exclude states with very low populations (working criteria: mean index < 0.1)
 
 mean.index=data.frame(mean.index = tapply(bird$ind,bird$state,mean, na.rm=T))
 mean.index$state = rownames(mean.index)
@@ -121,274 +94,151 @@ mean.index$exclude = ifelse(mean.index$mean.index < 0.1, "Y", "N")
 
 # calculate lm for r ~ ryld in each state
 # from: https://stackoverflow.com/questions/22713325/fitting-several-regression-models-with-dplyr
-head(all)
-allsimple = all %>% filter(is.na(r)!=T,is.na(ryld.lag1)!=T) %>% select(state,yearbird,r,ryld.lag1)
-allsimple
-allstate = allsimple %>% group_by(state) %>% do(fitstate = lm(r ~ ryld.lag1, na.action=na.exclude, data = .))
 
-(r.yld.lm = tidy(allstate, fitstate))
+r.ryld = r.ryld1 %>% 
+  filter(is.na(r)!=T & is.na(ryld.lag1)!=T) %>% 
+  select(state,yearbird,r,ryld.lag1) 
+
+r.ryld.lm = r.ryld %>%  
+  group_by(state) %>% 
+  do(fit.r.ryld = lm(r ~ ryld.lag1, na.action=na.exclude, data = .)) 
+
+r.ryld.lm.tidy = tidy(r.ryld.lm, fit.r.ryld)
+
+r.ryld.lm.beta = r.ryld.lm.tidy %>%
+    left_join(mean.index,by="state") %>%
+    filter(term == "ryld.lag1") # add this to exclude these before spatializing: & exclude =="N"
+return(r.ryld.lm.beta)
+}
+
+r.ryld.lm.beta.66.90 = birdyldlm("s05460",1966,1990)
+r.ryld.lm.beta.90.15 = birdyldlm("s05460",1990,2015)
+
+r.ryld.lm.beta.states1.66.90 = merge(states.latlong,r.ryld.lm.beta.66.90, by.y="state",by.x="STUSPS")
+r.ryld.lm.beta.states.66.90 = subset(r.ryld.lm.beta.states1.66.90,as.numeric(as.character(GEOID))<57 & STUSPS != "HI" 
+              & STUSPS != "AK")
+# write.csv(r.ryld.lm.beta.states.66.90@data,"r.ryld.lm.beta.66.90-function.csv")
+
+
+r.ryld.lm.beta.states1.90.15 = merge(states.latlong,r.ryld.lm.beta.90.15, by.y="state",by.x="STUSPS")
+r.ryld.lm.beta.states.90.15 = subset(r.ryld.lm.beta.states1.90.15,as.numeric(as.character(GEOID))<57 & STUSPS != "HI" 
+                                     & STUSPS != "AK")
+# write.csv(r.ryld.lm.beta.states.90.15@data,"r.ryld.lm.beta.90.15-function.csv")
+
+
+####
+#### Map of GRSP v. Yield Relationship, 1990-2015
+####
+
+r.ryld.lm.beta.states.fort.90.15 =
+  r.ryld.lm.beta.states.90.15 %>%
+  fortify(region = "STUSPS")
+
+r.ryld.lm.beta.ggmap.90.15 = merge(r.ryld.lm.beta.states.fort.90.15,
+                                   r.ryld.lm.beta.states.90.15@data, by.x ="id",by.y="STUSPS") %>%
+  mutate(cat = cut(estimate,breaks = c(-5000,-40,-20,-10,0,10,20,40,5000),
+                   labels = c("< -40","-40 to -20","-20 to -10","-10 to 0","0 to 10","10 to 20","20 to 40","> 40"))) 
+
+r.ryld.lm.sig.90.15 = cbind.data.frame(r.ryld.lm.beta.states.90.15@data,
+                                       lon = coordinates(r.ryld.lm.beta.states.90.15)[,1],
+                                       lat = coordinates(r.ryld.lm.beta.states.90.15)[,2])
+r.ryld.lm.sig.90.15 = filter(r.ryld.lm.sig.90.15, is.na(p.value) != T)
+
+
+x11(17,10)
+ggplot(r.ryld.lm.beta.ggmap.90.15) +
+  borders("usa",fill=gray(1)) +
+  geom_polygon(aes(long, lat, group=group, fill = cat)) +
+  coord_equal()  +
+  scale_fill_manual(values=c("#8c2d04","#cc4c02","#ec7014","#fe9929",gray(.8),gray(.7),gray(.6)),
+                    labels = c("< -40","-40 to -20","-20 to -10","-10 to 0","0 to 10","10-20","20-40")) +
+  labs(fill="slope", title = "Grasshopper Sparrow Pop. Growth Rate vs. Previous Year's Hay Yield", subtitle = "1990-2015") +
+  geom_point(data=r.ryld.lm.sig.90.15, aes(x = lon,y= lat,color = ifelse(p.value<0.1,"Y","N")),
+             color = ifelse(r.ryld.lm.sig.90.15$p.value<0.1,"black","white"), size=2.5)
+
+ggsave("figures/r.ryld.lm.beta.states.1990-2015.png")
+
+
+####
+#### Map of GRSP v. Yield Relationship, 1966-1990
+####
+
+r.ryld.lm.beta.states.fort.66.90 =
+  r.ryld.lm.beta.states.66.90 %>%
+  fortify(region = "STUSPS")
+
+r.ryld.lm.beta.ggmap.66.90 = merge(r.ryld.lm.beta.states.fort.66.90,
+                                   r.ryld.lm.beta.states.66.90@data, by.x ="id",by.y="STUSPS") %>%
+  mutate(cat = cut(estimate,breaks = c(-5000,-40,-20,-10,0,10,20,40,5000),
+                   labels = c("< -40","-40 to -20","-20 to -10","-10 to 0","0 to 10","10 to 20","20 to 40","> 40"))) 
+
+r.ryld.lm.sig.66.90 = cbind.data.frame(r.ryld.lm.beta.states.66.90@data,
+                                       lon = coordinates(r.ryld.lm.beta.states.66.90)[,1],
+                                       lat = coordinates(r.ryld.lm.beta.states.66.90)[,2])
+r.ryld.lm.sig.66.90 = filter(r.ryld.lm.sig.66.90, is.na(p.value) != T)
+
+
+x11(17,10)
+ggplot(r.ryld.lm.beta.ggmap.66.90) +
+  borders("usa",fill=gray(1)) +
+  geom_polygon(aes(long, lat, group=group, fill = cat)) +
+  coord_equal()  +
+  scale_fill_manual(values=c("#8c2d04","#cc4c02","#ec7014","#fe9929",gray(.8),gray(.7),gray(.6),gray(.5)),
+                    labels = c("< -40","-40 to -20","-20 to -10","-10 to 0","0 to 10","10-20","20-40","> 40")) +
+  labs(fill="slope", title = "Grasshopper Sparrow Pop. Growth Rate vs. Previous Year's Hay Yield", subtitle = "1966-1990") +
+  geom_point(data=r.ryld.lm.sig.66.90, aes(x = lon,y= lat,color = ifelse(p.value<0.05,"Y","N")),
+             color = ifelse(r.ryld.lm.sig.66.90$p.value<0.05,"black","white"), size=2.5)
+
+ggsave("figures/r.ryld.lm.beta.states.1966-1990.png")
 
 
 
-# put data into a 'wide format' matrix, with a column for each state and row for each year
-yld.mat = 
+
+
+
+#### a test to make sure lm's worked (top code borrowed from inside the function above - see comments there)
+
+birdyearstart = 1966
+birdyearend = 1990
+spcode = "s05460"
+
+bird =
+  bbs %>%
+  filter(sp==spcode & state!= "X" & state != "CAN" & year > birdyearstart-1 & year < birdyearend+1) %>%
+  arrange(state,year) %>%
+  mutate(r = ifelse(year==birdyearstart,NA,100*c(NA,diff(ind))/lag(ind))) %>%
+  left_join(states.lookup, by = "state") %>%
+  select(sp, state, year, ind,cred, r, State.ANSI = STATEFP, name = NAME) %>%
+  mutate(statelagyear = paste(state,year,sep=""))
+bird=droplevels(bird)
+
+detr.yld = 
+  yld %>% 
+  filter(Year > birdyearstart-1 & Year < birdyearend & Period=="YEAR") %>%
+  group_by(State) %>%
+  mutate(ryld = resid(lm(Value~Year))) %>%
+  arrange(State,Year) %>%
+  select(State,State.ANSI,Year,Value,ryld)
+
+detr.yld2 = 
   detr.yld %>%
-  select(State,Year,ryld) %>%
-  spread(State,ryld)
+  left_join(states.lookup, by = "State.ANSI") %>%
+  select(State, state, year = Year, yield = Value, ryld, State.ANSI = STATEFP, name = NAME) %>%
+  mutate(lagyear = year + 1, statelagyear = paste(state,lagyear,sep=""), State.ANSI = as.numeric(State.ANSI))
 
-# name state columns by USPS postal abbreviations
-colnames(yld.mat) = c("year","AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","ID","IL",
-                     "IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT",
-                     "NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI",
-                     "SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY")
+r.ryld1 = 
+  full_join(bird,detr.yld2,by = "statelagyear") %>%
+  select(stateyearbird = statelagyear, sp,State, state = state.x, ansi = State.ANSI.x, name = name.x, 
+         yearbird = year.x, yearyld = year.y,ind,r,yield.lag1 = yield,ryld.lag1 = ryld)
 
-yld.names = reshape2::melt(yld.mat[,2:ncol(yld.mat)])
-yld.names$year = rep(2016:1966,49); head(yld.names)
+r.ryld = r.ryld1 %>% 
+  filter(is.na(r)!=T & is.na(ryld.lag1)!=T) %>% 
+  select(state,yearbird,r,ryld.lag1)
+head(r.ryld)
 
-ggplot(yld.names) + 
-  geom_line(aes(x=year,y=value)) +
-  facet_wrap(~variable, scales = "free_y") 
-# check this against the facet plot above to make sure it worked (years were in order)
-
-
-
-# progress ...
-
-
-
-
-# create matrix of Pearson correlations among states
-yld.test = 
-  yld.mat %>%
-  corr.test(adjust="none")
-  
-yld.cor = 
-  data.frame(reshape2::melt(yld.test$r), 
-             reshape2::melt(yld.test$p)[3])
-colnames(yld.cor) = c("state1","state2","cor","pval"); head(yld.cor)
-yld.cor$pairid = paste(as.character(yld.cor$state1),"-",as.character(yld.cor$state2),sep=""); head(yld.cor); nrow(yld.cor)
-yld.cor=yld.cor[yld.cor$cor!=1,]; head(yld.cor); nrow(yld.cor); max(yld.cor$cor)
-yld.cor[230:235,] 
-
-#### combining yield correlations and interstate distances
-head(yld.cor); head(dstate)
-
-yldcordist = merge(yld.cor,dstate,by='pairid',all.x=T); head(yldcordist); nrow(yldcordist)
-colnames(yldcordist)[c(2,3)] <- c("state1","state2"); head(yldcordist)
-yldcordist = yldcordist[,c("pairid","state1","state2","cor","pval","dist","dcat","reg")]; head(yldcordist)
-yldcordist$sig = ifelse(yldcordist$pval<0.05,"Y","N"); head(yldcordist); nrow(yldcordist)
-
-### delete duplicate state pairs
-nrow(yldcordist) == length(unique(yldcordist$cor))*2 # this tests that all values of "cor" are unique
-  # if that returns "TRUE", then proceed (if not you need to find another way of removing duplicates)
-yldcordist = distinct(yldcordist, cor, .keep_all = TRUE); head(yldcordist); nrow(yldcordist)
-
-## exclude Alaska and... 
-## make subsets of the two main geographic areas (east and west of the Mississippi River)
-yldcordist = filter(yldcordist, state1!="AK" & state2!="AK"); nrow(yldcordist)
-yldcordist.east = filter(yldcordist,reg=="east") # 325 rows
-  # cordist.east = droplevels(cordist.east)
-yldcordist.west = filter(yldcordist,reg=="west")
-  # cordist.west = droplevels(cordist.west) # 231 rows
-
-# to change geographic region plotted below:
-# change following code to cordist.east (for east), 
-# cordist.west (for west), 
-# or cordist (for all)
-yldreg = yldcordist.east
-
-
-### SCATTERPLOT OF SYNCHRONY VS. DISTANCE
-#X11(13,9)
-ggplot(yldreg) + 
-  geom_point(aes(x=dist,y=cor,color=sig),size=4) + 
-  geom_smooth(aes(x=dist,y=cor),method="loess",color="black") 
-#ggsave("figures/YLD_cor_all_1966-2015_loess.png")
-#ggsave("figures/YLD_cor_east_1966-2015.png")
-#ggsave("figures/YLD_cor_west_1966-2015.png")
-
-# with significant pairs labeled
-ggplot(yldreg) + 
-  geom_point(aes(x=dist,y=cor,color=sig),size=4) + 
-  geom_smooth(aes(x=dist,y=cor),method="lm",color="black") +
-  geom_label(data=subset(yldreg,sig=="Y"),aes(x=dist,y=cor,label=pairid))
-
-
-###### plotting % signficant by distance bins 
-
-yldreg$sig1=ifelse(yldreg$sig=="Y",1,0)
-binlabels = c("<100","100-300","301-500","501-700","701-900",
-              "901-1100","1101-1300","1301-1500",">1500")
-corbin = cbind.data.frame(pctsig=100*tapply(yldreg$sig1,yldreg$dcat,mean,na.rm=T),
-                          n=tapply(yldreg$sig1,yldreg$dcat,length))
-corbin$bin=factor(rownames(corbin),levels=binlabels); corbin
-
-#x11(13,8.5)
-ggplot(corbin) + 
-  geom_col(aes(y=pctsig,x=bin)) + 
-  labs(x="distance (km)",y="% of correlations that are signifcant") 
-#ggsave("figures/YLD_bincor_all_1966-2015.png")
-#ggsave("figures/YLD_bincor_east_1966-2015.png")
-#ggsave("figures/YLD_bincor_west_1966-2015.png")
-
-
-## NEXT: need to create n = 1000 null (random) distributions for each bin like Martin et al. 
-## to test spatial extent of synchrony
-
-
-
-##### MAPPING AVERAGE LOCAL SYNCHRONY (EAST ONLY FOR NOW)
-
-yldreg$corres = resid(lm(cor~dist,data=yldreg)) 
-
-state.abr = unique(dstate$state1)
-
-# could make all this into a for loop?
-# something like: for(i in 1:length(state.abr))  {
-
-yldreg$AL = ifelse(yldreg$state1 %in% "AL"|yldreg$state2 %in% "AL","AL",""); head(yldreg)
-yldreg$DE = ifelse(yldreg$state1 %in% "DE"|yldreg$state2 %in% "DE","DE",""); head(yldreg)
-yldreg$GA = ifelse(yldreg$state1 %in% "GA"|yldreg$state2 %in% "GA","GA",""); head(yldreg)
-yldreg$IL = ifelse(yldreg$state1 %in% "IL"|yldreg$state2 %in% "IL","IL",""); head(yldreg)
-yldreg$IN = ifelse(yldreg$state1 %in% "IN"|yldreg$state2 %in% "IN","IN",""); head(yldreg)
-yldreg$KY = ifelse(yldreg$state1 %in% "KY"|yldreg$state2 %in% "KY","KY",""); head(yldreg)
-yldreg$MD = ifelse(yldreg$state1 %in% "MD"|yldreg$state2 %in% "MD","MD",""); head(yldreg)
-yldreg$MI = ifelse(yldreg$state1 %in% "MI"|yldreg$state2 %in% "MI","MI",""); head(yldreg)
-yldreg$NC = ifelse(yldreg$state1 %in% "NC"|yldreg$state2 %in% "NC","NC",""); head(yldreg)
-yldreg$NJ = ifelse(yldreg$state1 %in% "NJ"|yldreg$state2 %in% "NJ","NJ",""); head(yldreg)
-yldreg$NY = ifelse(yldreg$state1 %in% "NY"|yldreg$state2 %in% "NY","NY",""); head(yldreg)
-yldreg$OH = ifelse(yldreg$state1 %in% "OH"|yldreg$state2 %in% "OH","OH",""); head(yldreg)
-yldreg$PA = ifelse(yldreg$state1 %in% "PA"|yldreg$state2 %in% "PA","PA",""); head(yldreg)
-yldreg$SC = ifelse(yldreg$state1 %in% "SC"|yldreg$state2 %in% "SC","SC",""); head(yldreg)
-yldreg$TN = ifelse(yldreg$state1 %in% "TN"|yldreg$state2 %in% "TN","TN",""); head(yldreg)
-yldreg$VA = ifelse(yldreg$state1 %in% "VA"|yldreg$state2 %in% "VA","VA",""); head(yldreg)
-yldreg$WI = ifelse(yldreg$state1 %in% "WI"|yldreg$state2 %in% "WI","WI",""); head(yldreg)
-yldreg$WV = ifelse(yldreg$state1 %in% "WV"|yldreg$state2 %in% "WV","WV",""); head(yldreg)
-
-yldmeansynch = 
-  rbind.data.frame(
-    yldreg %>%
-      filter(dist<500,AL=="AL") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="AL")
-    ,
-    yldreg %>%
-      filter(dist<500,DE=="DE") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="DE")
-    ,
-    yldreg %>%
-      filter(dist<500,GA=="GA") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="GA")
-    ,
-    yldreg %>%
-      filter(dist<500,IL=="IL") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="IL")
-    ,
-    yldreg %>%
-      filter(dist<500,IN=="IN") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="IN")
-    ,
-    yldreg %>%
-      filter(dist<500,KY=="KY") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="KY")
-    ,
-    yldreg %>%
-      filter(dist<500,MD=="MD") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="MD")
-    ,
-    yldreg %>%
-      filter(dist<500,MI=="MI") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="MI")
-    ,
-    yldreg %>%
-      filter(dist<500,NC=="NC") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="NC")
-    ,
-    yldreg %>%
-      filter(dist<500,NJ=="NJ") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="NJ")
-    ,
-    yldreg %>%
-      filter(dist<500,NY=="NY") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="NY")
-    ,
-    yldreg %>%
-      filter(dist<500,OH=="OH") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="OH")
-    ,
-    yldreg %>%
-      filter(dist<500,PA=="PA") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="PA")
-    ,
-    yldreg %>%
-      filter(dist<500,SC=="SC") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="SC")
-    ,
-    yldreg %>%
-      filter(dist<500,TN=="TN") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="TN")
-    ,
-    yldreg %>%
-      filter(dist<500,VA=="VA") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="VA")
-    ,
-    yldreg %>%
-      filter(dist<500,WI=="WI") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="WI")
-    ,
-    yldreg %>%
-      filter(dist<500,WV=="WV") %>%
-      summarise(avg = mean(corres)) %>%
-      arrange(avg) %>%
-      cbind(state="WV")
-  )
-head(yldmeansynch); nrow(yldmeansynch)
-
-yld.mean.synch.map = merge(states.latlong,yldmeansynch, by.y="state",by.x="STUSPS")
-
-
-my.palette <- brewer.pal(n = 7, name = "YlOrRd")
-
-#x11(11,11)
-yld.mean.synch.map %>%
-  subset(STUSPS %in% c("AL","DE","GA","IL","IN","KY","MD","MI","NC","NJ","NY",
-                       "OH","PA","SC","TN","VA","WI","WV")) %>%
-  spplot(zcol="avg",col.regions = my.palette, cuts = 6, 
-         main = "Hay Yield Synchrony w/in 500 km, 1966-2015", col="transparent")
-
-
-# NEXT: REPEAT FOR 3 DIFF TIME STEPS (1966-1981, 1981-1996, 1997-2015), AND PUT
-  # AND PUT LOESS LINES ON THE SAME GRAPH
+### this code checks that lm's worked - they did
+test = r.ryld %>%
+  filter(state=="NV") 
+test1 = test %>%
+  lm(r~ryld.lag1, na.action=na.exclude, data = .)
+tidy(test1)  

@@ -48,14 +48,14 @@ states.lookup =
 ### FOR A GIVEN RANGE OF YEARS
 #####
 
-birdsynch = function(yearstart, yearend, spcode) {
+birdsynch = function(yearstart, yearend, spcode, region) {
 
 # yearstart should be the year before the first pop change (r) value, e.g., use 1966 when r starts at 1967
 # spcode is the AOU species code which you can look up here: https://www.pwrc.usgs.gov/bbl/manual/speclist.cfm
   #  spcode = s05460 for GRSP, s05010 for EAME, s04940 for BOBO, s05420 for SAVS
   # (for now: look up other species codes on BBS website and change the sp=="" to desired species)
 # filtering and joining BBS data to state code data; creating "population growth rate" (r) variable
-#yearstart=1990; yearend=2015; spcode="s05460" # for testing the function
+#yearstart=1990; yearend=2015; spcode="s05460"; region = "west" # for testing the function
 
 bird =
   bbs %>%
@@ -106,7 +106,7 @@ bird.cordist = bird.cor3 %>%
   select(pairid, state1=state1.x, state2=state2.x, cor,pval,dist,dcat,exclude,reg) %>%
   mutate(sig = ifelse(pval < 0.05,"Y","N"), sig1 = as.numeric(ifelse(pval < 0.05,"1","0"))) %>%
   distinct(cor, .keep_all = TRUE) %>%
-  filter(exclude=="N")
+  filter(exclude=="N", reg == region)
 
 return(bird.cordist)
 }
@@ -121,18 +121,20 @@ return(bird.cordist)
 bird.67.90 = cbind.data.frame(birdsynch(1966,1990,"s04940"), per = "1967-1990")
 bird.91.15 = cbind.data.frame(birdsynch(1990,2015,"s04940"), per = "1991-2015")
 bird.67.15 = cbind.data.frame(birdsynch(1966,2015,"s04940"), per = "1967-2015")
+bird.91.15.east = cbind.data.frame(birdsynch(1990,2015,"s05420","east"), per = "1991-2015")
+bird.91.15.west = cbind.data.frame(birdsynch(1990,2015,"s05420", "west"), per = "1991-2015")
 
 X11(13,9)
-ggplot(bird.67.90) + 
+ggplot(bird.91.15.east) + 
   geom_point(aes(x=dist,y=cor,color=sig),size=4,alpha=0.5) + 
   geom_smooth(aes(x=dist,y=cor),method="loess",color="black") 
-#ggsave("figures/sync_scatter/SAVS_cor_all_1967-1990.png")
+#ggsave("figures/sync_scatter/GRSP_cor_east_1991-2015.png")
 
 X11(13,9)
-ggplot(bird.91.15) + 
+ggplot(bird.91.15.west) + 
   geom_point(aes(x=dist,y=cor,color=sig),size=4,alpha=0.5) + 
   geom_smooth(aes(x=dist,y=cor),method="loess",color="black") 
-#ggsave("figures/sync_scatter/SAVS_cor_all_1991-2015.png")
+#ggsave("figures/sync_scatter/GRSP_cor_west_1991-2015.png")
 
 X11(13,9)
 ggplot(bird.67.15) + 
@@ -142,17 +144,17 @@ ggplot(bird.67.15) +
 #ggsave("figures/sync_scatter/zSAVS_cor_all_1967-2015.png")
 
 ### a better way to do it: rbinding together to make it easier to plot in ggplot
-bird2time = rbind(bird.67.90,bird.91.15)
+bird2time = rbind(bird.91.15.east,bird.91.15.west)
 
 X11(13,9)
 ggplot(bird2time) +
-  #  geom_point(aes(x = dist, y = cor, color=per, shape = sig), size=2, alpha = 0.5) +
+    geom_point(aes(x = dist, y = cor, color=reg, shape = sig), size=2, alpha = 0.5) +
   scale_shape_manual(values = c(16,1)) +
   scale_color_manual(values = c("#de2d26","#2b8cbe")) +
-  geom_smooth(aes(x = dist, y = cor, color=per), method = "loess", size = 2) +
+  geom_smooth(aes(x = dist, y = cor, color=reg), method = "loess", size = 2) +
   labs(title = "Spatial Synchrony in SAVS Pop. Growth Rate")
   #xlim(c(0,2500))
-#ggsave("figures/temp_change_sync/SAVS_synchrony.1967.vs.2015.nopts.png")
+#ggsave("figures/temp_change_sync/SAVS_synchrony.east.vs.west.1991.2015.png")
 
 
 ######

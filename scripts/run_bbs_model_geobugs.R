@@ -9,7 +9,7 @@ library(spdep)
 
 count = route.year.grid$count
 strat = route.year.grid$strat
-obser = as.numeric(gsub("\\.","",route.year.grid$obser))
+obser = route.year.grid$obser
 firstyr = route.year.grid$firstyr
 year = route.year.grid$year
 

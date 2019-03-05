@@ -1,26 +1,12 @@
 ###############################################################################################
 ###
-### This part is an attempt to generate the BBS indices myself
-### For 1-degree-grid-cell strata via methods in Michel et al. Ecography (2016)
-### i.e., the conditional Autoregressive spatial model described with code in Smith et al. PlosOne (2015)
+### An attempt to generate the BBS indices myself
+### for 1x1 degree grid-cell strata via methods in Michel et al. Ecography (2016)
+### to use in the conditional autoregressive (CAR) spatial model described with code in Smith et al. PlosOne (2015)
 ###
 ###############################################################################################
 
-# Links:
-# BBS Route-level data fields: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/Summary.txt
-# BBS RouteID info: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/RegionCodes.txt
-# BBS phys strata map: https://www.pwrc.usgs.gov/bbs/StrataNames/strata_map_small.htm
-# BBS Route info txt with BCR and strata codes: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/RouteInf.txt
-# BBS BCR shapefile: http://www.pwrc.usgs.gov/bba/index.cfm?fa=bba.getdata
-# Smith et al. sup data for CAR model and indices of aerial insectivores: 
-#       https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0130768#sec016
-#       https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0130768.s005&type=supplementary
-# Michel et al. README file: https://datadryad.org/bitstream/handle/10255/dryad.96773/README.txt?sequence=2
-# Michel et al. paper with link to sup code files: https://onlinelibrary.wiley.com/doi/abs/10.1111/ecog.01798
-
-# Michel et al. keep all strata with "two or more routes where the species has been observed 
-# and at least one of which with >= 10 years of data
-
+# see Links at bottom for data sources, papers, etc.
 
 ########################################################################################
 
@@ -86,15 +72,10 @@ brw.route.year = brw %>%
   mutate(ObsN.rid.year = row_number(), yr = Year-1965) %>%  
   mutate(ObsN.rid.first = as.numeric(ifelse(ObsN.rid.year==1,1,0))) %>%
   ungroup() %>%
-  filter(is.na(lat)==F) %>%
+  filter(is.na(lat)==F) %>% # this excludes ~ 20 routes without attribute data
   group_by(grid) %>%
   mutate(ObsN.rid.count = as.numeric(as.factor(ObsN.rid))) %>%
   ungroup()
-
-
-# the filter command in line 90 excludes 20 routes with no associated route time/location info in "r" file
-# use this next line to test they are gone
-# test = brw.route[is.na(brw.route$lat),]
 
 brw.route = brw.route.year %>%
   group_by(rid) %>%
@@ -130,31 +111,81 @@ plot(grid.summary.spatial)
 route.year.grid = brw.route.year %>%
   left_join(select(grid.summary, grid, include_strat), by = "grid") %>%
   filter(include_strat==1) %>%
-  select(count = sp.number, grid, obser = ObsN.rid, firstyr = ObsN.rid.first, 
+  select(count = sp.number, grid, obser = ObsN.rid.count, firstyr = ObsN.rid.first, 
          year = yr, -include_strat, grid_lat, grid_lon) %>%
   mutate(grid = gsub("-","_",grid))
-  
+
 route.year.grid.spatial = SpatialPointsDataFrame(route.year.grid[,c("grid_lon","grid_lat")],route.year.grid)
 proj4string(route.year.grid.spatial) = CRS("+init=epsg:4326")
 plot(route.year.grid.spatial)
 # writeOGR(route.year.grid.spatial, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "grsp_route_yrs", driver="ESRI Shapefile")
 
-# just the grid cells included in the analysis (Michel et al. criteria - Ecography 2016)
-grid.grsp.spatial = SpatialPointsDataFrame(grid.summary[grid.summary$include_strat==1,c("grid_lon","grid_lat")],grid.summary[grid.summary$include_strat==1,])
+
+#### TO SUMMARIZE DATA BY YEAR AND GRID
+
+grid.year = route.year.grid %>%
+  group_by(grid, year, grid_lat, grid_lon) %>%
+  summarise(mean.count = mean(count)) %>%
+  ungroup() %>%
+  mutate(year = year+1965, grid.year = paste(grid,year,sep="."))
+
+grid.year.66.91 = grid.year %>%
+  filter(year < 1992)
+
+grid.year.92.17 = grid.year %>%
+  filter(year > 1991)
+
+### create criteria for including only grid cells with < XX years of zeros
+
+grid.include2 = grid.year %>%
+  group_by(grid) %>%
+  summarise(num.zeros = sum(mean.count==0)) %>%
+  mutate(include2 = ifelse(num.zeros >4,0,1)) %>%
+  ungroup()
+
+grid.include2.66.91 = grid.year.66.91 %>%
+  group_by(grid) %>%
+  summarise(num.zeros = sum(mean.count==0)) %>%
+  mutate(include2 = ifelse(num.zeros >4,0,1)) %>%
+  ungroup()
+
+grid.include2.92.17 = grid.year.92.17 %>%
+  group_by(grid) %>%
+  summarise(num.zeros = sum(mean.count==0)) %>%
+  mutate(include2 = ifelse(num.zeros >4,0,1)) %>%
+  ungroup()
+
+# adding the second inclusion criteria to grid.summary
+# subsetting just the included grid cells based on Michel et al. criteria*
+## *Michel et al. criteria (Ecography 2016): at least 2 routes with species, and at least one route with 10+ years of data
+## additional restrictions are based on number of years with zeros
+
+grid.summary2 = grid.summary %>%
+  mutate(grid = gsub("-","_",grid)) %>%
+  left_join(grid.include2, by = "grid") %>%
+  filter(include_strat==1 & include2 == 1)
+
+
+# make into spatial object
+
+grid.grsp.spatial = SpatialPointsDataFrame(grid.summary2[,c("grid_lon","grid_lat")],grid.summary2)
 proj4string(grid.grsp.spatial) = CRS("+init=epsg:4326")
 plot(grid.grsp.spatial)
 # writeOGR(grid.grsp.spatial, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "grsp_grid", driver="ESRI Shapefile")
+
 
 #### attempting to make a grid of spatial polygons that match up with data
 rr <- raster::raster(ext = extent(-177, -52, 24, 69), res=c(1,1))
 values(rr) <- 1:ncell(rr)
 p <- rasterToPolygons(rr)
-attributes = dplyr::tibble(grid_lon = coordinates(p)[,1], grid_lat = coordinates(p)[,2]) %>%
+attributes = tibble(grid_lon = coordinates(p)[,1], grid_lat = coordinates(p)[,2]) %>%
   mutate(join = 1, grid = paste(trunc(grid_lat),trunc(grid_lon),sep="")) %>%
-  left_join(filter(grid.summary,include_strat==1), by="grid") 
+  mutate(grid = gsub("-","_",grid)) %>%
+  left_join(grid.summary2, by="grid") 
 
 p$grid = attributes$grid
 p$include_strat = attributes$include_strat
+p$include2 = attributes$include2
 p$nonzeroweight = attributes$nonzeroweight
 p$nobservers = attributes$nobservers
 p$strata = log(attributes$sp.mean)
@@ -162,18 +193,18 @@ p$strata = log(attributes$sp.mean)
 
 grid.grsp = p[p$include_strat==1 & is.na(p$include_strat)==F,]
 grid.grsp@data = grid.grsp@data %>%
-  select(layer, grid, include_strat, nonzeroweight, nobservers,strata) %>%
-  mutate(grid = gsub("-","_",grid), strat = 1:558)
+  select(layer, grid, include_strat, include2, nonzeroweight, nobservers, strata) %>%
+  mutate(strat = 1:nrow(grid.grsp@data))
 head(grid.grsp@data)
 
 plot(grid.grsp)
-# writeOGR(grid.grsp, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "grsp_grid_poly", driver="ESRI Shapefile")
+# writeOGR(grid4.grsp, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "grsp_grid4_poly", driver="ESRI Shapefile")
 
 proj = "+proj=lcc +lat_1=20 +lat_2=60 +lat_0=40 +lon_0=-96 +x_0=10000000 +y_0=10000000 +datum=NAD83 +units=m +no_defs"
 grid.grsp.lamb0 = spTransform(grid.grsp, proj)
 plot(grid.grsp.lamb0)
 head(grid.grsp.lamb0); nrow(grid.grsp.lamb0)
-# writeOGR(grid.grsp.lamb0, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "grsp_grid_poly_lamb6", driver="ESRI Shapefile")
+# writeOGR(grid4.grsp.lamb0, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "grsp_grid4_poly_lamb0", driver="ESRI Shapefile")
 
 
 # changing names of the ID variable of the polygons to grid labels so names are visible in geobugs map
@@ -188,17 +219,32 @@ sapply(slot(grid.grsp.lamb0, "polygons"), function(x) slot(x, "ID"))
 
 ### converting spatial data to geobugs format if needed
 
-#sp2WB(grid.grsp.lamb0, "grid.grsp.lamb3.txt")
+#sp2WB(grid.grsp.lamb0, "grid.grsp.lamb.txt")
 
 
-#### TO SUMMARIZE DATA BY YEAR AND GRID
-route.year.grid = route.year.grid %>%
-  left_join(grid.grsp.lamb0@data, by = "grid")
+### attaching the include2 criteria back onto the summary by grid4 and year
 
-grid.year = route.year.grid %>%
-  group_by(grid, year, grid_lat,grid_lon) %>%
-  summarise(mean.count = mean(count)) %>%
-  ungroup() %>%
-  mutate(year = year+1965, grid.year = paste(grid,year,sep="."))
+grid.year = grid.year %>%
+  left_join(grid.include2,by = "grid") %>%
+  filter(include2 == 1)
+
+grid.year.92.17 = grid.year.92.17 %>%
+  left_join(grid.include2.92.17,by = "grid") %>%
+  filter(include2 == 1)
+
+grid.year.66.91 = grid.year.66.91 %>%
+  left_join(grid.include2.66.91,by = "grid") %>%
+  filter(include2 == 1)
 
 
+### Links to data sources, code, papers, etc.
+# BBS Route-level data fields: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/Summary.txt
+# BBS RouteID info: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/RegionCodes.txt
+# BBS phys strata map: https://www.pwrc.usgs.gov/bbs/StrataNames/strata_map_small.htm
+# BBS Route info txt with BCR and strata codes: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/RouteInf.txt
+# BBS BCR shapefile: http://www.pwrc.usgs.gov/bba/index.cfm?fa=bba.getdata
+# Smith et al. sup data for CAR model and indices of aerial insectivores: 
+#       https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0130768#sec016
+#       https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0130768.s005&type=supplementary
+# Michel et al. README file: https://datadryad.org/bitstream/handle/10255/dryad.96773/README.txt?sequence=2
+# Michel et al. paper with link to sup code files: https://onlinelibrary.wiley.com/doi/abs/10.1111/ecog.01798

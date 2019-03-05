@@ -75,41 +75,63 @@ head(dstate)
 ###
 
 # run bbs_to_grid.R code first
-plot(grid.grsp.lamb0,col="gray")
 
-# get centroids of all states
-# NOTE: the 'coordinates' function produces identical centroids to packages such as rgeos
-plot(grid.grsp.lamb0)
-points(coordinates(grid.grsp.lamb0),pch=1)
+plot(grid.grsp) # plot includable cells from 1966-2017 for comparison
 
-grid.grsp.latlong = spTransform(grid.grsp.lamb0,CRS("+proj=longlat +datum=WGS84"))
+grid.92.17.spatial = SpatialPointsDataFrame(distinct(grid.year.92.17[,c("grid_lon","grid_lat")]),
+                                             distinct(grid.year.92.17[,c("grid_lon","grid_lat","grid")]))
+proj4string(grid.92.17.spatial) = CRS("+init=epsg:4326")
+points(grid.92.17.spatial)
 
-plot(grid.grsp.latlong)
-points(coordinates(grid.grsp.latlong))
 #
-(df.grsp.grid=data.frame(name = grid.grsp.latlong$grid, 
-                      lat = coordinates(grid.grsp.latlong)[,2],
-                      lon = coordinates(grid.grsp.latlong)[,1]))
+(df.grsp.grid.92.17 = data.frame(name = grid.92.17.spatial$grid, 
+                                  lat = coordinates(grid.92.17.spatial)[,2],
+                                  lon = coordinates(grid.92.17.spatial)[,1]))
 
 #calculate Haversine distances between grid cells
-dmat.grid = round(distm(df.grsp.grid[,c("lon","lat")])/1000)
-colnames(dmat.grid) <- df.grsp.grid$name; head(dmat.grid)
-dmat.grid2 = data.frame(grid2=df.grsp.grid$name, dmat.grid); dmat.grid2
+dmat.grid.92.17 = round(distm(df.grsp.grid.92.17[,c("lon","lat")])/1000)
+colnames(dmat.grid.92.17) <- df.grsp.grid.92.17$name; head(dmat.grid.92.17)
+dmat.grid.92.17B = data.frame(gridB=df.grsp.grid.92.17$name, dmat.grid.92.17)
 
-dgrid= data.frame(reshape2::melt(dmat.grid2)) %>%
+dgrid.92.17 = data.frame(reshape2::melt(dmat.grid.92.17B)) %>%
   filter(value!=0) %>%
-  select(grid2,grid1 = variable, dist = value) %>%
-  mutate(grid1 = gsub("X","",grid1)) %>%
-  mutate(pairid = paste(grid2,".",grid1,sep=""))
+  select(gridB,gridA = variable, dist = value) %>%
+  mutate(gridA = gsub("X","",gridA)) %>%
+  mutate(pairid = paste(gridB,".",gridA,sep=""))
 
-head(dgrid); nrow(dgrid)
-
-binlabels=c("<100","100-300","301-500","501-700","701-900","901-1100","1101-1300",
-            "1301-1500",">1500")
-
-dgrid$dcat=cut(dgrid$dist,c(0,100,300,500,700,900,1100,1300,1500,100000),
-                labels=binlabels)
-head(dgrid)
-#write.csv(dstate,"data/dgrid.csv")
+head(dgrid.92.17)
+#write.csv(dgrid.92.17,"data/dgrid.92.17.csv")
 
 
+
+###
+################# SAME FOR 2 X 2 DEGREE LAT / LONG GRIDS
+###
+
+# run bbs_to_grid4.R code first
+
+plot(grid4.grsp) # plot includable cells from 1966-2017 for comparison
+
+grid4.92.17.spatial = SpatialPointsDataFrame(distinct(grid4.year.92.17[,c("grid4_lon","grid4_lat")]),
+                                             distinct(grid4.year.92.17[,c("grid4_lon","grid4_lat","grid4")]))
+proj4string(grid4.92.17.spatial) = CRS("+init=epsg:4326")
+points(grid4.92.17.spatial)
+
+#
+(df.grsp.grid4.92.17 = data.frame(name = grid4.92.17.spatial$grid4, 
+                         lat = coordinates(grid4.92.17.spatial)[,2],
+                         lon = coordinates(grid4.92.17.spatial)[,1]))
+
+#calculate Haversine distances between grid cells
+dmat.grid4.92.17 = round(distm(df.grsp.grid4.92.17[,c("lon","lat")])/1000)
+colnames(dmat.grid4.92.17) <- df.grsp.grid4.92.17$name; head(dmat.grid4.92.17)
+dmat.grid4.92.17B = data.frame(grid4B=df.grsp.grid4.92.17$name, dmat.grid4.92.17)
+
+dgrid4.92.17 = data.frame(reshape2::melt(dmat.grid4.92.17B)) %>%
+  filter(value!=0) %>%
+  select(grid4B,grid4A = variable, dist = value) %>%
+  mutate(grid4A = gsub("X","",grid4A)) %>%
+  mutate(pairid = paste(grid4B,".",grid4A,sep=""))
+
+head(dgrid4.92.17)
+#write.csv(dgrid4.92.17,"data/dgrid4.92.17.csv")

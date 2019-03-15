@@ -1,17 +1,16 @@
 ###############################################################################################
 ###
-### An attempt to generate the BBS indices myself
-### for 2x2 degree grid-cell strata via methods in Michel et al. Ecography (2016)
-### to use in the conditional autoregressive (CAR) spatial model described with code in Smith et al. PlosOne (2015)
+### Summarize route-level BBS data by 2x2 degree grid-cell for spatial synchrony analysis
+### Eventually will use methods to correct for observer effects, e.g., the conditional autoregressive (CAR) spatial model described with code in Smith et al. PlosOne (2015) and used by Michel et al. Ecography (2016)
 ###
 ###############################################################################################
 
 # see Links at bottom for data sources, papers, etc.
 # to do:
-# 1) include raw inclusion variables into the final data products 
-      # so they can be excluded as needed on the fly in the final synchrony step
-      # without re-running data
-# 2) move grid-cell polygon creation code to separate script file
+# 1) include raw "inclusion" variables (e.g., num zeros) into the final data products 
+      # that way grid-cells can be excluded as needed on the fly in the final synchrony step
+      # without re-running entire code
+# 2) move grid-cell polygon creation code to separate script file? or within function?
 
 #######################################
 ### Read in BBS data (route, weather, and separate bird data files by state)
@@ -413,19 +412,21 @@ canada.fort = ggplot2::fortify(can) %>%
   filter(lat <60.0001)
 
 na <- ggplot() +
-  borders("world", xlim = c(-150, -60), ylim = c(30, 40), colour = "gray85", fill = "gray80")  +
-  #borders("state", colour = "gray85", fill = "gray80") +
-  #geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray85", fill = "gray80") +
+  borders("world", xlim = c(-150, -60), ylim = c(30, 80), colour = "gray85", fill = "gray80")  +
+  borders("state", colour = "gray85", fill = "gray80") +
+  geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray85", fill = "gray80") +
   theme_map() + 
   coord_map('albers', lat0=30, lat1=60)
 
-x11(21,7)
-ggplot(filter(mapsync,per=="1992-2017")) +
-  geom_point(aes(x = grid_lon, y = grid_lat, color = corcat), size = 3, alpha = .7) + 
+x11(13,13)
+(
+  map <- na +
+  geom_point(aes(x = grid_lon, y = grid_lat, color = corcat), size = 3, alpha = .7, data = filter(mapsync,per=="1992-2017")) + 
   scale_colour_manual(values = c("#ffffb2", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026")) +
-  theme_bw() +
+  theme_classic() +
   theme(text = element_text(size=15)) +
-  facet_grid(~sp)
+  facet_wrap(~sp, ncol=2)
+)
 
 x11(21,7)
 ggplot(filter(mapsync,per=="1966-1991")) +

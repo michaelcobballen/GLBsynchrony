@@ -27,6 +27,12 @@ library(psych)
 library(tidyr)
 library(RColorBrewer)
 library(ggthemes)
+library(ggridges)
+library(viridis)
+library(forcats)
+library(lme4)
+library(Hmisc)
+load("~/Research/Chapter 3 - Synchrony/GLBsynchrony/bbsync.RData")
 
 #######################################
 ### Read in BBS data (route, weather, and separate bird data files by state)
@@ -597,7 +603,7 @@ canada.fort = ggplot2::fortify(can) %>%
   filter(lat <60.0001)
 
 na <- ggplot() +
-  borders("world", xlim = c(-150, -60), ylim = c(30, 40), colour = "gray85", fill = "gray80")  +
+  borders("world", xlim = c(-150, -60), ylim = c(35, 40), colour = "gray85", fill = "gray80")  +
   borders("state", colour = "gray85", fill = "gray80") +
   geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray85", fill = "gray80") +
   theme_map() + 
@@ -678,6 +684,21 @@ na +
   xlim(c(-142,-59))
 #ggsave("figures/grid4_maps/ALLsp.grid4_incdec_AR_5zeros_n20_60lat.png")
 
+# mapping change in synchrony - magnitude, continous with viridis color scheme
+x11(30,20)
+na +
+  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = syncdiff), size = 1, alpha = .7, data = syncdiff) + 
+  scale_color_viridis(name = "change", option = "viridis") +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  facet_wrap(~sp.x) +
+  labs(colour="Change in\nmean\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59))
+#ggsave("figures/grid4_maps/ALLsp.grid4_change.viridis_AR_5zeros_n20_60lat.png")
+
 #######################################
 ###### mapping MEAN change in synchrony across all species
 #######################################
@@ -685,14 +706,16 @@ na +
 meansyncdiff = syncdiff %>%
   group_by(grid.x, grid_lat.x, grid_lon.x) %>%
   summarise(meansyncdiff = mean(syncdiff), n = length(sp.x)) %>%
+  ungroup() %>%
   filter(n >= 3) %>%
   mutate(meandiffcat = cut(meansyncdiff, breaks = c(-.3,-.25,-.2,-.15,-.1,-.05,0,.05,.1,.15,.2,.25,.3))) %>%
-  mutate(meanincdec = ifelse(meansyncdiff>0,"Increasing","Decreasing"))
+  mutate(meanincdec = ifelse(meansyncdiff>0,"Increasing","Decreasing")) %>%
+  mutate(species = "All species")
   
 # mapping change in synchrony - magnitude
 x11(13,9)
 na +
-  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = meandiffcat), size = 3, alpha = .7, data = meansyncdiff) + 
+  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = meandiffcat), size = 4, alpha = 1, data = meansyncdiff) + 
   scale_colour_manual(values = c("#053061","#5e4fa2","#3288bd","#66c2a5","#abdda4","#e6f598",
                                  "#fee08b","#fdae61","#f46d43","#d53e4f","#9e0142", "#67001f")) +
   theme_classic() +
@@ -707,7 +730,7 @@ na +
 # mapping change in synchrony - increase/decrease
 x11(13,9)
 na +
-  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = meanincdec), size = 3, alpha = .7, data = meansyncdiff) + 
+  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = meanincdec), size = 4, alpha = .7, data = meansyncdiff) + 
   scale_colour_manual(values = c("blue","red")) +
   theme_classic() +
   theme(text = element_text(size=15)) +
@@ -718,24 +741,148 @@ na +
   xlim(c(-142,-59))
 #ggsave("figures/grid4_maps/Mean.ALLsp.grid4_incdec_AR_5zeros_n20_60lat.png")
 
+# mapping change in synchrony - magnitude - continuous with viridis color ramp
+x11(13,9)
+na +
+  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = meansyncdiff), size = 4, alpha = 1, data = meansyncdiff) + 
+  scale_color_viridis(name = "Mean\nchange", option = "viridis") +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59))
+#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis_AR_5zeros_n20_60lat.png")
+
 #######################################
-###### forest or ridgeline plot change in synchrony across all species
+###### ridgeline plot change in synchrony across all species
 #######################################
 
-library(ggridges)
-library(viridis)
-x11(13,9)
-syncdiff %>%
-  rename(species = sp.x) %>%
+ridgeplotdata = syncdiff %>%
+  select(species = sp.x, syncdiff, incdec, grid_lon.x) %>%
+  bind_rows(select(meansyncdiff, species, syncdiff = meansyncdiff, incdec = meanincdec, grid_lon.x)) %>%
   filter(species != "STGR" & species != "MCLO") %>%
+  mutate(region = ifelse(grid_lon.x <= -90, "West", "East")) %>%
+  group_by(species) %>%
+  mutate(medmeandiff = median(syncdiff), n = length(species), 
+         meanmeandiff = mean(syncdiff), sdmeandiff = sd(syncdiff), 
+         wtmeandiff = 1/(sdmeandiff^2)) %>%
+  ungroup() %>%
+  mutate(medmeandiff = as.numeric(ifelse(species == "All species","1",medmeandiff))) %>%
+  mutate(species = fct_reorder(species, medmeandiff, .desc = T))
+
+# rename codes to be full species names
+levels(ridgeplotdata$species) =  
+         rev(c("E. Meadowlark","Sprague's Pipit",
+            "N. Harrier","Chestnut-col. Longspur",
+            "Grasshopper Sparrow","Upland Sandpiper",
+            "Ring-necked Pheasant", "Vesper Sparrow",
+            "Bobolink", "LeConte's Sparrow", "Horned Lark",
+            "Savannah Sparrow", "W. Meadowlark",
+            "Lark Bunting", "Dickcissel",
+            "Baird's Sparrow","Sedge Wren", 
+            "Cassin's Sparrow", "Long-billed Curlew","All species"))
+
+# summary by species for plotting sample sizes and calculating weighted mean/CI
+ridgeplot_sum = ridgeplotdata %>%
+  arrange(desc(medmeandiff)) %>%
+  select(species,medmeandiff,n,meanmeandiff,sdmeandiff,wtmeandiff) %>%
+  distinct() %>%
+  mutate(n = as.numeric(ifelse(species == "All species", "", n)))
+
+# linear mixed-effects model to find grand mean and CI
+library(lme4)
+
+lmedata = filter(ridgeplotdata, species != "All species")
+lmemod = lmer(syncdiff ~ 1 + (1|species), data = lmedata)
+allspmean = data.frame(mean = fixef(lmemod), 
+           se = sqrt(diag(vcov(lmemod, useScale = FALSE)))) %>%
+  mutate(ucl = mean + 2*se, lcl = mean - 2*se)
+
+x11(10,9)
+ridgeplotdata %>%
+  mutate(syncdiff = as.numeric(ifelse(species=="All species", NA, syncdiff))) %>%
 ggplot(aes(x = syncdiff, y = species, fill = ..x..), fill="gray") +
   geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01, quantile_lines = TRUE, quantiles=2) +
-  scale_fill_viridis(name = "change", option = "viridis") +
-  labs(title = 'Change in spatial synchrony, 1966-1991 vs. 1992-2017', x = "Change in spatial synchrony") +
-  theme_bw()
-#ggsave("figures/grid4_maps/ALLsp.grid4_change.ridgeline_AR_5zeros_n20_60lat.png")
+  scale_fill_viridis(name = "Mean\nchange", option = "viridis") +
+  labs(x = 'Change in spatial synchrony, 1966-1991 vs. 1992-2017', y = "") +
+  annotate("text", x = 0.754, y = (2:21)+0.5, 
+           label = c(paste0(ridgeplot_sum$n[2:20]),"grid cells (n) ="), 
+           hjust = 1, color = "gray25", size=3) +
+  theme_bw() +
+  xlim(c(-0.754,0.754)) +
+  geom_vline(aes(xintercept = 0), color="red", linetype = 2) +
+  theme(axis.text=element_text(size=12, color = "black"), axis.title=element_text(size=12)) +
+  geom_segment(aes(x = allspmean$lcl, y = 1.4, xend = allspmean$ucl, yend = 1.4), color="black", size = 1) +
+  geom_point(data=allspmean, aes(x = mean, y = 1.4), color="red", shape = 18, size = 3.5)
+#ggsave("figures/grid4_maps/ALLsp.grid4_change.ridgeline_AR_5zeros_n20_60latB.png")
 
+#######################################
+###### forest plot change in synchrony across all species
+#######################################
 
+# means for each species and bootstrapped confidence intervals
+# https://stackoverflow.com/questions/38554383/bootstrapped-confidence-intervals-with-dplyr
+# note: should ultimately use "spatial block bootstrapping": https://sites.google.com/site/halkingwang/programming/r/spatiallycorrelatederrorsspatialblockbootstrappingbagoflittlebootstrapblb
+dotplotdata = ridgeplotdata %>%
+#  filter(species != "All species") %>%
+  group_by(species) %>%
+  do(data.frame(rbind(Hmisc::smean.cl.boot(.$syncdiff))))  %>%
+  ungroup() %>%
+  mutate(mean.order = as.numeric(ifelse(species == "All species","-1",Mean))) %>%
+  mutate(species = fct_reorder(species, mean.order, .desc = F)) %>%
+  # input overall mean and CI from the linear mixed-effect model intercept
+  mutate(Mean = as.numeric(ifelse(species == "All species",allspmean$mean,Mean))) %>%
+  mutate(Lower = as.numeric(ifelse(species == "All species",allspmean$lcl,Lower))) %>%
+  mutate(Upper = as.numeric(ifelse(species == "All species",allspmean$ucl,Upper)))
+
+dotplot_n = dotplotdata %>%
+  left_join(ridgeplot_sum, by = "species") %>%
+  select(species, Mean, Lower, Upper, n) %>%
+  mutate(order = ifelse(species == "All species", -1, Mean)) %>%
+  arrange(desc(order)) %>%
+  mutate(n = ifelse(species == "All species", "", n))
+  
+x11(10,9)
+ggplot(data = dotplotdata) +
+  geom_vline(aes(xintercept = 0), color="red", linetype = 2, size = 1.5) +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper, y = species, height = .2)) +
+  geom_point(aes(x = Mean, y = species, color = Mean), size = 4.5) +
+  scale_color_viridis(name = "Mean\nchange", option = "viridis",limits=c(-.1,.21)) +
+  labs(x = 'Change in spatial synchrony, 1966-1991 vs. 1992-2017', y = "") +
+  annotate("text", x = 0.48, y = c(20.4,20:1), 
+           label = c("",paste0(dotplot_n$n[1:20])), 
+           hjust = 1, color = "gray25", size=4) +
+  annotate("text", x = 0.43, y = 20, label = "n = ", color = "gray25") +
+  xlim(c(-0.3,0.48)) +
+  theme_bw() +
+  theme(axis.text=element_text(size=12, color = "black"), axis.title=element_text(size=12,color="black"))
+#ggsave("figures/grid4_maps/ALLsp.grid4_change.forestplot_AR_5zeros_n20.png")
+
+#######################################
+###### traits vs. syncrhony
+#######################################
+# migratory status based on BBS guild classifications: 
+# https://www.mbr-pwrc.usgs.gov/bbs/guild/guildlst.html (also used by Zuckerberg et al. 2009)
+    # note: coding Ring-necked Pheasant as "Short" (it is actually Res) to combine those categories
+# trend info from # https://www.mbr-pwrc.usgs.gov/cgi-bin/tf15.pl
+traits = dotplot_n %>%
+  filter(species != "All species") %>%
+  mutate(mig = c("Neo","Short","Short","Neo","Neo","Neo","Short","Short","Short","Short",
+                 "Neo","Neo","Short","Short","Neo","Short","Short","Short","Short")) %>%
+  mutate(massL = c(640.1, 18.3, 7.73, 17.8, 35.9, 25.2, 89.4, 13, 19.7, 104.4, 28.7, 151, 
+                    917, 20.3, 17.34, 24.9, 336, 100.1, 23.6)) %>% # avg. mass of the smaller sex (largest n on breeding grounds, BNA); or pooled avg. if sample size larger
+  mutate(massU = c(758.6, 18.3, 8.25, 19.1, 38.5, 28.5, 106, 13.2, 19.7, 111.3, 33, 164, 
+                    1263, 20.3, 18.75, 26.5, 513, 123.2, 23.9)) %>% # avg. mass of the larger sex (largest n on breeding grounds, BNA); or pooled avg. if sample size larger
+  mutate(mass = (massL + massU)/2) %>%
+  dplyr::select(-massL, -massU) %>%
+  mutate(trend.66.91 = c(-0.40,-0.98,0.07,-1.92,-4.74,-1.04,-1.51,-1.93,-1.63,-2.47,-3.15,0.08,
+                         -1.31,-4.56,-2.93,-1.06,-1.83,-3.48,-3.20)) %>%
+  mutate(trend.92.15 = c(1.17,-1.21,0.62,-2.39,-1.46,0.18,-1.10,-2.39,-1.27,-2.35,-0.80,0.70,0.02,
+                         -4.18,-2.01,-0.67,-1.10,-3.24,-2.18)) %>%
+  mutate(trend.change = trend.92.15 - trend.66.91)
+  
 #######################################
 ###### Links to data sources, code, papers, etc.
 #######################################

@@ -871,18 +871,66 @@ traits = dotplot_n %>%
   filter(species != "All species") %>%
   mutate(mig = c("Neo","Short","Short","Neo","Neo","Neo","Short","Short","Short","Short",
                  "Neo","Neo","Short","Short","Neo","Short","Short","Short","Short")) %>%
+  mutate(ord = c("non",rep("pas",10),"non","non",rep("pas",3),"non","pas","pas")) %>%
+  mutate(firstegg = c("Apr 1-15","Jul 15-31","Jun 1-15","Jun 1-15","May 15-31","May 15-31","May 1-15",
+                       "May 15-31","Jun 1-15","Mar 15-31","May 15-31","May 1-15","Apr 15-30",
+                       "May 1-15","Jun 1-15","May 1-15","Apr 15-30","May 1-15","May 15-31")) %>%
+  mutate(phen = c("early",rep("late",5),"early",rep("late",2),"early","late",rep("early",3),"late",
+                  rep("early",3),"late")) %>%
   mutate(massL = c(640.1, 18.3, 7.73, 17.8, 35.9, 25.2, 89.4, 13, 19.7, 104.4, 28.7, 151, 
                     917, 20.3, 17.34, 24.9, 336, 100.1, 23.6)) %>% # avg. mass of the smaller sex (largest n on breeding grounds, BNA); or pooled avg. if sample size larger
   mutate(massU = c(758.6, 18.3, 8.25, 19.1, 38.5, 28.5, 106, 13.2, 19.7, 111.3, 33, 164, 
                     1263, 20.3, 18.75, 26.5, 513, 123.2, 23.9)) %>% # avg. mass of the larger sex (largest n on breeding grounds, BNA); or pooled avg. if sample size larger
   mutate(mass = (massL + massU)/2) %>%
   dplyr::select(-massL, -massU) %>%
+  mutate(trend.66.15 = c(0.17,-0.75,0.40,-2.17,-2.90,-0.36,-1.29,-2.59,-1.36,-2.46,-2.06,0.40,
+                         -0.64,-4.19,-2.52,-0.85,-1.21,-3.28,-3.10)) %>%
   mutate(trend.66.91 = c(-0.40,-0.98,0.07,-1.92,-4.74,-1.04,-1.51,-1.93,-1.63,-2.47,-3.15,0.08,
                          -1.31,-4.56,-2.93,-1.06,-1.83,-3.48,-3.20)) %>%
   mutate(trend.92.15 = c(1.17,-1.21,0.62,-2.39,-1.46,0.18,-1.10,-2.39,-1.27,-2.35,-0.80,0.70,0.02,
                          -4.18,-2.01,-0.67,-1.10,-3.24,-2.18)) %>%
-  mutate(trend.change = trend.92.15 - trend.66.91)
-  
+  mutate(trend.change = trend.92.15 - trend.66.91) %>%
+  mutate(n = as.numeric(n))
+
+# model set for species-level traits vs. change in synchrony
+mass.mod = lm(Mean ~ log(mass), data = traits, weights=n); summary(mass.mod)
+trend.mod = lm(Mean ~ trend.66.15, data = traits, weights=n); summary(trend.mod)
+mig.mod = lm(Mean ~ mig, data = traits, weights=n); summary(mig.mod)
+phen.mod = lm(Mean ~ phen, data = traits, weights=n); summary(phen.mod)
+glob.mod = lm(Mean ~ log(mass) + trend.66.15 + mig + phen, data = traits, weights = n); summary(glob.mod)
+
+MuMIn::AICc(mass.mod, trend.mod,mig.mod,phen.mod,glob.mod)
+
+x11(9,9)
+ggplot(traits) +
+  geom_point(aes(x=trend.66.15, y = Mean, size = as.numeric(n))) +
+  geom_smooth(aes(x = trend.66.15, y = Mean), method = "lm", se=T, color="black") +
+  cowplot::theme_cowplot() +
+  labs(size = "n", x = "BBS Trend (1966-2015)", y = "Change in spatial synchrony")
+#ggsave("species.traits.vs.change.synchrony.jpg")
+
+# conserve-o-gram of all grassland species
+# note: soon add other species: McCownan's LS: -7.60 to -5.20
+x11(12,12)
+traits %>%
+  mutate(species = fct_reorder(species, trend.92.15)) %>%
+ggplot() +
+  geom_segment(aes(x = trend.66.91, y = species, xend = trend.92.15, yend = species), size = 1, 
+               color = "gray50", arrow = arrow(length = unit(.5,"cm"))) +
+  geom_segment(aes(x = 0, y = 1, xend = 0, yend = 19), size = 2, color = "black", linetype = 2) +
+  geom_point(aes(x=trend.66.91, y = species), size = 4, color = "gray50") +
+  geom_point(aes(x=trend.92.15, y = species), size = 4, color = "firebrick") +
+  labs(x = "BBS Pop. Trends (% change per year)", y = "") +
+  labs(title = "Change in trend, 1966-1991 vs. 1992-2015") +
+  theme(axis.text = element_text(size = 12), title = element_text(size = 12)) +
+  annotate("text", x = c(-.25, .25), y = 1, 
+         label = c("decreasing","increasing"),
+         hjust = c(1,0), color = "gray25", size=4)
+# ggsave("conservatogram_grassland_birds.jpg")
+
+
+
+
 #######################################
 ###### Links to data sources, code, papers, etc.
 #######################################

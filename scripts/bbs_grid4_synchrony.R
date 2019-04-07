@@ -932,6 +932,75 @@ ggplot() +
 
 
 #######################################
+###### making polygon file with synchrony change data, for cluster analysis
+#######################################
+
+# make a grid of spatial polygons to match up with data
+library(raster)
+rr <- raster::raster(ext = extent(-177, -52, 24, 69), res=c(2,2))
+values(rr) <- 1:ncell(rr)
+p <- rasterToPolygons(rr)
+attributes = tibble(grid4_lon = coordinates(p)[,1], grid4_lat = coordinates(p)[,2]) %>%
+  mutate(join = 1, grid.x = paste(trunc(grid4_lat),trunc(grid4_lon),sep="")) %>%
+  mutate(grid.x = gsub("-","_",grid.x)) %>%
+  left_join(meansyncdiff, by="grid.x") 
+
+p$grid = attributes$grid.x
+p$meansyncdiff = attributes$meansyncdiff
+p$n = attributes$n
+p$meandiffcat = attributes$meandiffcat
+
+meansyncdiff.poly = p[is.na(p$n)!=T,]
+
+plot(meansyncdiff.poly, col="gray")
+head(meansyncdiff.poly)
+# writeOGR(meansyncdiff.poly, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "meansyncdiff_poly", driver="ESRI Shapefile")
+
+# plot meansyncdiff polygon grid in ggplot
+meansyncdiff.data = fortify(meansyncdiff.poly, region = "grid") %>%
+  left_join(rename(meansyncdiff.poly@data, id=grid),by = "id")
+
+# read in cluster shapefile (local Moran's I analysis performed in GeoDa)
+clusters = readOGR("data/meansyncdiff_cluster.shp")
+cluster_fort = fortify(clusters, region = "grid") %>% left_join(rename(clusters@data,id=grid), by = "id")
+
+x11(13,9)
+na + geom_polygon(data=meansyncdiff.data, aes(x=long, y = lat, group=group, fill = meansyncdiff)) + 
+  scale_fill_viridis(name = "Mean\nchange", option = "viridis") +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59)) +
+  geom_polygon(data = filter(cluster_fort, LISA_CL==1), aes(x = long, y = lat, group=group), color = "red",fill="transparent") +
+  geom_polygon(data = filter(cluster_fort, LISA_CL==2), aes(x = long, y = lat, group=group), color = "white",fill="transparent")
+#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis.poly_AR_5zeros_n20_60lat.png")
+
+# who contributes to main increasing synchrony cluster?
+# make a list of the 13 grid cells in that cluster
+grid_inc = data.frame(grid=unique(filter(cluster_fort, LISA_CL==1)$id)) %>% 
+  filter(grid != "50_96")
+# count the number of grid cells (out of 13) occupied by each species
+who_inc = syncdiff %>%
+  filter(grid.x %in% grid_inc$grid) %>%
+  group_by(sp.x) %>%
+  summarise(contribution = length(sp.x)) %>%
+  arrange(desc(contribution))
+
+# who contributes to main decreasing synchrony cluster?
+# make a list of the 13 grid cells in that cluster
+grid_dec = data.frame(grid=unique(filter(cluster_fort, LISA_CL==2)$id)) %>% 
+  filter(grid != "44_66")
+# count the number of grid cells (out of 12) occupied by each species
+who_dec = syncdiff %>%
+  filter(grid.x %in% grid_dec$grid) %>%
+  group_by(sp.x) %>%
+  summarise(contribution = length(sp.x)) %>%
+  arrange(desc(contribution))
+
+#######################################
 ###### Links to data sources, code, papers, etc.
 #######################################
 # BBS Route-level data fields: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/Summary.txt

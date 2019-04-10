@@ -13,7 +13,7 @@
 # 2) incorporate a re-sampling / montecarlo test for the binned bar graphs and/or maps
 
 #######################################
-### load libraries
+### load libraries and pre-run function data
 #######################################
 library(dplyr)
 library(stringr)
@@ -72,7 +72,7 @@ bbsync = function(spcode, yearstart, yearend, method, output){
 #spcode = "5460" # AOU species number; #  spcode = s05460 for GRSP, s05010 for EAME, s04940 for BOBO, s05420 for SAVS
 #yearstart = 1992
 #yearend = 2017
-#method = "AR" # "AR" = residuals from 1st order autoregressive model, "change" = first difference of logged counts
+#method = "AR" # "AR" = residuals from 1st order autoregressive model, "change" = first difference of logged (count + 1)
 minyearsdata = 10 # each grid cell contains at least one route with at least this many years of data (10 is based on criteria of Michel et al. Ecography 2016)
 minsproutes = 2 # each grid cell contains at least this many routes at which the species was detected (2 is based on criteria of Michel et al. Ecography 2016)
 maxzeros = 5 # maximum number of years allowable where the mean count for the species is zero (I chose five)
@@ -597,7 +597,7 @@ mapsync =
   mutate(cells = length(sp)) %>%
   ungroup()
 
-# making North America map
+# making North America maps
 can = readOGR("data/province.shp")
 canada.fort = ggplot2::fortify(can) %>%
   filter(lat <60.0001)
@@ -875,8 +875,8 @@ traits = dotplot_n %>%
   mutate(firstegg = c("Apr 1-15","Jul 15-31","Jun 1-15","Jun 1-15","May 15-31","May 15-31","May 1-15",
                        "May 15-31","Jun 1-15","Mar 15-31","May 15-31","May 1-15","Apr 15-30",
                        "May 1-15","Jun 1-15","May 1-15","Apr 15-30","May 1-15","May 15-31")) %>%
-  mutate(phen = c("early",rep("late",5),"early",rep("late",2),"early","late",rep("early",3),"late",
-                  rep("early",3),"late")) %>%
+  mutate(phen = as.factor(c("before 15 May",rep("after 15 May",5),"before 15 May",rep("after 15 May",2),"before 15 May","after 15 May",rep("before 15 May",3),"after 15 May",
+                  rep("before 15 May",3),"after 15 May"))) %>%
   mutate(massL = c(640.1, 18.3, 7.73, 17.8, 35.9, 25.2, 89.4, 13, 19.7, 104.4, 28.7, 151, 
                     917, 20.3, 17.34, 24.9, 336, 100.1, 23.6)) %>% # avg. mass of the smaller sex (largest n on breeding grounds, BNA); or pooled avg. if sample size larger
   mutate(massU = c(758.6, 18.3, 8.25, 19.1, 38.5, 28.5, 106, 13.2, 19.7, 111.3, 33, 164, 
@@ -892,22 +892,38 @@ traits = dotplot_n %>%
   mutate(trend.change = trend.92.15 - trend.66.91) %>%
   mutate(n = as.numeric(n))
 
+traits$phen = factor(traits$phen,levels(traits$phen)[c(2,1)])
+
 # model set for species-level traits vs. change in synchrony
 mass.mod = lm(Mean ~ log(mass), data = traits, weights=n); summary(mass.mod)
-trend.mod = lm(Mean ~ trend.66.15, data = traits, weights=n); summary(trend.mod)
 mig.mod = lm(Mean ~ mig, data = traits, weights=n); summary(mig.mod)
 phen.mod = lm(Mean ~ phen, data = traits, weights=n); summary(phen.mod)
-glob.mod = lm(Mean ~ log(mass) + trend.66.15 + mig + phen, data = traits, weights = n); summary(glob.mod)
+glob.mod = lm(Mean ~ log(mass) + mig + phen, data = traits, weights = n); summary(glob.mod)
+null.mod = lm(Mean ~ 1, data = traits, weights=n); summary(null.mod)
 
-MuMIn::AICc(mass.mod, trend.mod,mig.mod,phen.mod,glob.mod)
+MuMIn::AICc(mass.mod, mig.mod,phen.mod,glob.mod,null.mod)
+
+phen.fit = 
+  data.frame(
+  fit = predict(phen.mod, se.fit = T, newdata = data.frame(phen = c("before 15 May","after 15 May")))$fit,
+  se = predict(phen.mod, se.fit = T, newdata = data.frame(phen = c("before 15 May","after 15 May")))$se.fit,
+  phen = c("before 15 May","after 15 May"),
+  type = c(1,2)
+  ) %>%
+  mutate(fitU = fit + 2*se, fitL = fit - 2*se)
+  
 
 x11(9,9)
 ggplot(traits) +
-  geom_point(aes(x=trend.66.15, y = Mean, size = as.numeric(n))) +
-  geom_smooth(aes(x = trend.66.15, y = Mean), method = "lm", se=T, color="black") +
+  geom_point(aes(x=phen, y = Mean, size = as.numeric(n)),shape=16, color="black",alpha = 0.25) +
+  geom_point(aes(x=phen, y = Mean, size = as.numeric(n)),shape=1, color="black",alpha = 1) +
+  geom_errorbar(data=phen.fit, stat = "identity", aes(x = type+0.1, y=fit, ymin=fitL,ymax=fitU), 
+                color="firebrick",alpha = 1, width=0.1) +
+  geom_point(data=phen.fit, aes(x = type+0.1, y=fit), color="firebrick",size = 4) +
   cowplot::theme_cowplot() +
-  labs(size = "n", x = "BBS Trend (1966-2015)", y = "Change in spatial synchrony")
-#ggsave("species.traits.vs.change.synchrony.jpg")
+  labs(size = "n", x = "Nesting phenology (start peak egg laying)", y = "Change in spatial synchrony") 
+  
+#ggsave("species.traits.vs.change.synchrony2.jpg")
 
 # conserve-o-gram of all grassland species
 # note: soon add other species: McCownan's LS: -7.60 to -5.20
@@ -927,7 +943,6 @@ ggplot() +
          label = c("decreasing","increasing"),
          hjust = c(1,0), color = "gray25", size=4)
 # ggsave("conservatogram_grassland_birds.jpg")
-
 
 
 
@@ -966,7 +981,7 @@ cluster_fort = fortify(clusters, region = "grid") %>% left_join(rename(clusters@
 
 x11(13,9)
 na + geom_polygon(data=meansyncdiff.data, aes(x=long, y = lat, group=group, fill = meansyncdiff)) + 
-  scale_fill_viridis(name = "Mean\nchange", option = "viridis") +
+  scale_fill_viridis(name = "Mean\nchange", option = "inferno") +
   theme_classic() +
   theme(text = element_text(size=15)) +
   labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
@@ -976,7 +991,7 @@ na + geom_polygon(data=meansyncdiff.data, aes(x=long, y = lat, group=group, fill
   xlim(c(-142,-59)) +
   geom_polygon(data = filter(cluster_fort, LISA_CL==1), aes(x = long, y = lat, group=group), color = "red",fill="transparent") +
   geom_polygon(data = filter(cluster_fort, LISA_CL==2), aes(x = long, y = lat, group=group), color = "white",fill="transparent")
-#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis.poly_AR_5zeros_n20_60lat.png")
+#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.inferno.poly_AR_5zeros_n20_60lat.png")
 
 # who contributes to main increasing synchrony cluster?
 # make a list of the 13 grid cells in that cluster

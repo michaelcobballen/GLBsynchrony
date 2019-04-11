@@ -977,11 +977,15 @@ meansyncdiff.data = fortify(meansyncdiff.poly, region = "grid") %>%
 
 # read in cluster shapefile (local Moran's I analysis performed in GeoDa)
 clusters = readOGR("data/meansyncdiff_cluster.shp")
+clust.dec = readOGR("data/decreasing_cluster_dissolve.shp")
+clust.inc = readOGR("data/increasing_cluster_dissolve.shp")
 cluster_fort = fortify(clusters, region = "grid") %>% left_join(rename(clusters@data,id=grid), by = "id")
+clust.dec_fort = fortify(clust.dec)
+clust.inc_fort = fortify(clust.inc)
 
 x11(13,9)
 na + geom_polygon(data=meansyncdiff.data, aes(x=long, y = lat, group=group, fill = meansyncdiff)) + 
-  scale_fill_viridis(name = "Mean\nchange", option = "inferno") +
+  scale_fill_viridis(name = "Mean\nchange", option = "viridis") +
   theme_classic() +
   theme(text = element_text(size=15)) +
   labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
@@ -989,9 +993,16 @@ na + geom_polygon(data=meansyncdiff.data, aes(x=long, y = lat, group=group, fill
   theme(legend.title.align=0.5) +
   theme(axis.line = element_line(color = "transparent")) +
   xlim(c(-142,-59)) +
-  geom_polygon(data = filter(cluster_fort, LISA_CL==1), aes(x = long, y = lat, group=group), color = "red",fill="transparent") +
-  geom_polygon(data = filter(cluster_fort, LISA_CL==2), aes(x = long, y = lat, group=group), color = "white",fill="transparent")
-#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.inferno.poly_AR_5zeros_n20_60lat.png")
+  geom_polygon(data = clust.inc_fort, aes(x = long, y = lat, group=group), color = "red",fill="transparent",size=1) +
+  geom_polygon(data = clust.dec_fort, aes(x = long, y = lat, group=group), color = "white",fill="transparent",size=1)
+#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis.poly_AR_5zeros_n20_60lat.png")
+
+#qpal<-colorQuantile("OrRd", exp(g@data$strata)-1, n=9) 
+qpal = colorFactor("OrRd",clusters@data$LISA_CL)
+
+leaflet(clust.inc) %>%
+  addPolygons(stroke = T, fillOpacity = 0, smoothFactor = 0.2, color = "red") %>%
+  addTiles()
 
 # who contributes to main increasing synchrony cluster?
 # make a list of the 13 grid cells in that cluster

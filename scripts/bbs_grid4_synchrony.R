@@ -32,6 +32,7 @@ library(viridis)
 library(forcats)
 library(lme4)
 library(Hmisc)
+library(leaflet)
 load("~/Research/Chapter 3 - Synchrony/GLBsynchrony/bbsync.RData")
 
 #######################################
@@ -760,8 +761,8 @@ na +
 #######################################
 
 ridgeplotdata = syncdiff %>%
-  select(species = sp.x, syncdiff, incdec, grid_lon.x) %>%
-  bind_rows(select(meansyncdiff, species, syncdiff = meansyncdiff, incdec = meanincdec, grid_lon.x)) %>%
+  dplyr::select(species = sp.x, syncdiff, incdec, grid_lon.x) %>%
+  bind_rows(dplyr::select(meansyncdiff, species, syncdiff = meansyncdiff, incdec = meanincdec, grid_lon.x)) %>%
   filter(species != "STGR" & species != "MCLO") %>%
   mutate(region = ifelse(grid_lon.x <= -90, "West", "East")) %>%
   group_by(species) %>%
@@ -787,7 +788,7 @@ levels(ridgeplotdata$species) =
 # summary by species for plotting sample sizes and calculating weighted mean/CI
 ridgeplot_sum = ridgeplotdata %>%
   arrange(desc(medmeandiff)) %>%
-  select(species,medmeandiff,n,meanmeandiff,sdmeandiff,wtmeandiff) %>%
+  dplyr::select(species,medmeandiff,n,meanmeandiff,sdmeandiff,wtmeandiff) %>%
   distinct() %>%
   mutate(n = as.numeric(ifelse(species == "All species", "", n)))
 
@@ -839,7 +840,7 @@ dotplotdata = ridgeplotdata %>%
 
 dotplot_n = dotplotdata %>%
   left_join(ridgeplot_sum, by = "species") %>%
-  select(species, Mean, Lower, Upper, n) %>%
+  dplyr::select(species, Mean, Lower, Upper, n) %>%
   mutate(order = ifelse(species == "All species", -1, Mean)) %>%
   arrange(desc(order)) %>%
   mutate(n = ifelse(species == "All species", "", n))
@@ -925,15 +926,33 @@ ggplot(traits) +
   
 #ggsave("species.traits.vs.change.synchrony2.jpg")
 
-# conserve-o-gram of all grassland species
-# note: soon add other species: McCownan's LS: -7.60 to -5.20
+# conserv-o-gram of all grassland species
+# note: soon add other species:   
+  # McCownan's LS: -7.60 to -5.20
+  # HESP -5.80, 3.05
+  # MOPL -4.42, -2.14
+  # GRPC -1.76, 7.73
+  # STGR -1.43, 1.54
+  # FERH 0.09, 0.84
+
+extra.spp=
+data.frame(
+species = c("McCown's Longspur","Henslow's Sparrow","Mountain Plover","Greater Prairie Chicken", "Sharp-tailed Grouse",
+    "Ferruginous Hawk"),
+Mean=NA,Lower=NA,Upper=NA,n=NA,order=NA,mig=NA,ord=NA,
+    firstegg=NA,phen=NA,mass=NA,trend.66.15=NA,
+trend.66.91=c(-7.6,-5.8,-4.42,-1.76,-1.43,0.09),
+trend.92.15=c(-5.2,3.05,-2.14,7.73,1.54,0.84),trend.change=NA
+)
+
 x11(12,12)
 traits %>%
+  bind_rows(extra.spp) %>%
   mutate(species = fct_reorder(species, trend.92.15)) %>%
 ggplot() +
   geom_segment(aes(x = trend.66.91, y = species, xend = trend.92.15, yend = species), size = 1, 
                color = "gray50", arrow = arrow(length = unit(.5,"cm"))) +
-  geom_segment(aes(x = 0, y = 1, xend = 0, yend = 19), size = 2, color = "black", linetype = 2) +
+  geom_segment(aes(x = 0, y = 1, xend = 0, yend = 25), size = 2, color = "black", linetype = 2) +
   geom_point(aes(x=trend.66.91, y = species), size = 4, color = "gray50") +
   geom_point(aes(x=trend.92.15, y = species), size = 4, color = "firebrick") +
   labs(x = "BBS Pop. Trends (% change per year)", y = "") +
@@ -942,7 +961,7 @@ ggplot() +
   annotate("text", x = c(-.25, .25), y = 1, 
          label = c("decreasing","increasing"),
          hjust = c(1,0), color = "gray25", size=4)
-# ggsave("conservatogram_grassland_birds.jpg")
+# ggsave("conservogram_grassland_birds_extra.jpg")
 
 
 
@@ -1009,26 +1028,145 @@ leaflet(clust.inc) %>%
 grid_inc = data.frame(grid=unique(filter(cluster_fort, LISA_CL==1)$id)) %>% 
   filter(grid != "50_96")
 # count the number of grid cells (out of 13) occupied by each species
-who_inc = syncdiff %>%
-  filter(grid.x %in% grid_inc$grid) %>%
+who_inc_data = syncdiff %>%
+  filter(grid.x %in% grid_inc$grid) 
+
+who_inc = who_inc_data %>%
   group_by(sp.x) %>%
-  summarise(contribution = length(sp.x)) %>%
+  summarise(contribution = length(sp.x), med = median(syncdiff)) %>%
   arrange(desc(contribution))
+
+# make boxplots of syncdiff within the Semiarid Prairies cluster by species
+x11(13,9)
+who_inc_data %>%
+  left_join(who_inc, by = "sp.x") %>%
+  mutate(sp.x = fct_reorder(sp.x, med, .desc = T)) %>%
+  ggplot() +
+  geom_boxplot(aes(y = syncdiff, x = sp.x), fill="gray") +
+  geom_segment(aes(
+    y = 0,
+    x = 0,
+    xend = 13,
+    yend = 0
+  ), color = "gray", size = 1.5, linetype = 2) +
+  geom_point(aes(y = syncdiff, x = sp.x)) +
+  labs(y = "Change in synchrony \n(semiarid prairie cluster)",
+       x = "") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=14),  axis.text.y = element_text(size=12),
+        axis.title.y = element_text(size = 15))
+ggsave("figures/pub_figs/increases_in_semiarid_prairie_cluster.jpg")
 
 # who contributes to main decreasing synchrony cluster?
 # make a list of the 13 grid cells in that cluster
 grid_dec = data.frame(grid=unique(filter(cluster_fort, LISA_CL==2)$id)) %>% 
   filter(grid != "44_66")
 # count the number of grid cells (out of 12) occupied by each species
-who_dec = syncdiff %>%
-  filter(grid.x %in% grid_dec$grid) %>%
+who_dec_data = syncdiff %>%
+  filter(grid.x %in% grid_dec$grid)
+
+who_dec = who_dec_data %>%
   group_by(sp.x) %>%
-  summarise(contribution = length(sp.x)) %>%
+  summarise(contribution = length(sp.x), med = median(syncdiff)) %>%
   arrange(desc(contribution))
+
+# make boxplots of syncdiff within the Semiarid Prairies cluster by species
+x11(13,9)
+who_dec_data %>%
+  left_join(who_dec, by = "sp.x") %>%
+  mutate(sp.x = fct_reorder(sp.x, med, .desc = T)) %>%
+  ggplot() +
+  geom_boxplot(aes(y = syncdiff, x = sp.x), fill="gray") +
+  geom_segment(aes(
+    y = 0,
+    x = 0,
+    xend = 9,
+    yend = 0
+  ), color = "gray", size = 1.5, linetype = 2) +
+  geom_point(aes(y = syncdiff, x = sp.x)) +
+  labs(y = "Change in synchrony \n(Northeast cluster)",
+       x = "") +
+  theme_classic() +
+  theme(axis.text.x = element_text(size=14),  axis.text.y = element_text(size=12),
+        axis.title.y = element_text(size = 15))
+ggsave("figures/pub_figs/sync_changes_in_Northeast_cluster.jpg")
+
+#######################################
+###### plotting time series of contributing species in the hot-spots
+#######################################
+
+incclust = c("42_102", "40_102", "38_102", "36_102", "36_104", "38_100", "36_100", 
+             "34_100", "32_100", "34_98", "32_98", "30_98")
+grsp.ts = bbsync("5460", 1966, 2017, "AR", "grid.year") %>%
+  filter(grid4 %in% incclust)
+
+casp.ts = bbsync("5780", 1966, 2017, "AR", "grid.year") %>%
+  filter(grid4 %in% incclust)
+
+hola.ts = bbsync("4740", 1966, 2017, "AR", "grid.year") %>%
+  filter(grid4 %in% incclust)
+
+
+x11(17,9)
+ggplot(filter(casp.ts, year<1992)) +
+  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+  cowplot::theme_cowplot() +
+  labs(title = "Cassin's Sparrow, 1966-1991", y = "Annual growth rate, log(Nt/Nt-1)",
+       color="Grid cell\n(lat_lon)")
+ggsave("CASP_increasing_cluster_1966-1991.jpg")
+
+x11(17,9)
+ggplot(filter(casp.ts, year>1991)) +
+  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+  cowplot::theme_cowplot() +
+  labs(title = "Cassin's Sparrow, 1992-2017", y = "Annual growth rate, log(Nt/Nt-1)",
+       color="Grid cell\n(lat_lon)") +
+  scale_x_continuous(breaks=c(1995,2000,2005,2010,2015)) +
+  scale_y_continuous(limits=c(-3,3), breaks=c(-3, -2, -1, 0, 1, 2, 3))
+ggsave("CASP_increasing_cluster_1992-2017.jpg")
+
+x11(17,9)
+ggplot(filter(hola.ts, year<1992)) +
+  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+  cowplot::theme_cowplot() +
+  labs(title = "Horned Lark, 1966-1991", y = "Annual growth rate, log(Nt/Nt-1)",
+       color="Grid cell\n(lat_lon)") +
+  scale_y_continuous(limits=c(-.75,1.5), breaks=c(-1, -0.5, 0, 0.5, 1, 1.5))
+ggsave("HOLA_increasing_cluster_1966-1991.jpg")
+
+x11(17,9)
+ggplot(filter(hola.ts, year>1991)) +
+  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+  cowplot::theme_cowplot() +
+  labs(title = "Horned Lark, 1992-2017", y = "Annual growth rate, log(Nt/Nt-1)",
+       color="Grid cell\n(lat_lon)") +
+  scale_x_continuous(breaks=c(1995,2000,2005,2010,2015)) +
+  scale_y_continuous(limits=c(-.75,1.5), breaks=c(-1, -0.5, 0, 0.5, 1, 1.5))
+ggsave("HOLA_increasing_cluster_1992-2017.jpg")
+
+x11(17,9)
+ggplot(filter(grsp.ts, year<1992)) +
+  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+  cowplot::theme_cowplot() +
+  labs(title = "Grasshopper Sparrow, 1966-1991", y = "Annual growth rate, log(Nt/Nt-1)",
+       color="Grid cell\n(lat_lon)") +
+  scale_y_continuous(limits=c(-2,2), breaks=c(-2, -1, 0, 1, 2))
+ggsave("GRSP_increasing_cluster_1966-1991.jpg")
+
+x11(17,9)
+ggplot(filter(grsp.ts, year>1991)) +
+  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+  cowplot::theme_cowplot() +
+  labs(title = "Grasshopper Sparrow, 1992-2017", y = "Annual growth rate, log(Nt/Nt-1)",
+       color="Grid cell\n(lat_lon)") +
+  scale_x_continuous(breaks=c(1995,2000,2005,2010,2015)) +
+  scale_y_continuous(limits=c(-2,2), breaks=c(-2, -1, 0, 1, 2))
+ggsave("GRSP_increasing_cluster_1992-2017.jpg")
 
 #######################################
 ###### Links to data sources, code, papers, etc.
 #######################################
+# list of grassland bird species: https://www.mbr-pwrc.usgs.gov/bbs/grass/actlist.htm
 # BBS Route-level data fields: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/Summary.txt
 # BBS RouteID info: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/RegionCodes.txt
 # BBS phys strata map: https://www.pwrc.usgs.gov/bbs/StrataNames/strata_map_small.htm

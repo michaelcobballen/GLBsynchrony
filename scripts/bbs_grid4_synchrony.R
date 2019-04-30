@@ -369,9 +369,11 @@ if(output == "route.year"){
 # writeOGR(eame.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "eame_grid4_poly_lamb.92.17", driver="ESRI Shapefile")
 #savs.map = bbsync("5420",1992,2017,"AR","grid.map"); x11(13,9); plot(savs.map,col="gray")
 # writeOGR(savs.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "savs_grid4_poly_lamb.92.17", driver="ESRI Shapefile")
+#casp.map = bbsync("5780",1992,2017,"AR","grid.map"); x11(13,9); plot(savs.map,col="gray")
+# writeOGR(savs.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "casp_grid4_poly_lamb.92.17", driver="ESRI Shapefile")
 
 #######################################
-###### summarizing function results in dataframe to map / graph more easily
+###### summarizing 'syncrony-distance' results into one dataframe to map / graph more easily
 #######################################
 # AOU species number; #  spcode = s05460 for GRSP, s05010 for EAME, s04940 for BOBO, s05420 for SAVS
                       # s07550 for WOTH, s06740 for OVEN, 
@@ -642,7 +644,7 @@ na +
 #ggsave("figures/grid4_maps/ALLsp.grid4_66.91_AR_5zeros_n20_60lat.png")
 
 #######################################
-###### mapping change in synchrony
+###### mapping change in synchrony separately for each species
 #######################################
 
 mapsync.early = mapsync %>% filter(per=="1966-1991") %>% mutate(grid.sp = paste(grid,sp,sep="."))
@@ -966,7 +968,7 @@ ggplot() +
 
 
 #######################################
-###### making polygon file with synchrony change data, for cluster analysis
+###### synchrony change map (all spp) with cluster analysis
 #######################################
 
 # make a grid of spatial polygons to match up with data
@@ -1016,6 +1018,7 @@ na + geom_polygon(data=meansyncdiff.data, aes(x=long, y = lat, group=group, fill
   geom_polygon(data = clust.dec_fort, aes(x = long, y = lat, group=group), color = "white",fill="transparent",size=1)
 #ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis.poly_AR_5zeros_n20_60lat.png")
 
+# leaflet map to view interactive 'open street map' of what is in clusters
 #qpal<-colorQuantile("OrRd", exp(g@data$strata)-1, n=9) 
 qpal = colorFactor("OrRd",clusters@data$LISA_CL)
 
@@ -1023,6 +1026,69 @@ leaflet(clust.inc) %>%
   addPolygons(stroke = T, fillOpacity = 0, smoothFactor = 0.2, color = "red") %>%
   addTiles()
 
+#######################################
+###### synchrony change map (invividual spp) with cluster overlay
+#######################################
+
+# make a grid of spatial polygons to match up with data
+library(raster)
+rr <- raster::raster(ext = extent(-177, -52, 24, 69), res=c(2,2))
+values(rr) <- 1:ncell(rr)
+p <- rasterToPolygons(rr)
+attributes = tibble(grid4_lon = coordinates(p)[,1], grid4_lat = coordinates(p)[,2]) %>%
+  mutate(join = 1, grid.x = paste(trunc(grid4_lat),trunc(grid4_lon),sep="")) %>%
+  mutate(grid.x = gsub("-","_",grid.x)) %>%
+  left_join(filter(syncdiff, sp.x == "GRSP"), by="grid.x") 
+
+p$grid = attributes$grid.x
+p$syncdiff = attributes$syncdiff
+p$diffcat = attributes$diffcat
+p$sp = attributes$sp.x
+
+syncdiff.poly = p[is.na(p$sp)!=T,]
+
+plot(syncdiff.poly, col="gray")
+head(syncdiff.poly)
+# writeOGR(meansyncdiff.poly, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "meansyncdiff_poly", driver="ESRI Shapefile")
+
+# plot syncdiff polygon for individual species grid in ggplot
+syncdiff.data = fortify(syncdiff.poly, region = "grid") %>%
+  left_join(rename(syncdiff.poly@data, id=grid),by = "id")
+
+# read in cluster shapefile (local Moran's I analysis performed in GeoDa)
+clusters = readOGR("data/meansyncdiff_cluster.shp")
+clust.dec = readOGR("data/decreasing_cluster_dissolve.shp")
+clust.inc = readOGR("data/increasing_cluster_dissolve.shp")
+cluster_fort = fortify(clusters, region = "grid") %>% left_join(rename(clusters@data,id=grid), by = "id")
+clust.dec_fort = fortify(clust.dec)
+clust.inc_fort = fortify(clust.inc)
+
+x11(13,9)
+na + geom_polygon(data=syncdiff.data, aes(x=long, y = lat, group=group, fill = syncdiff)) + 
+  scale_fill_viridis(name = "Mean\nchange", option = "viridis") +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59)) +
+  geom_polygon(data = clust.inc_fort, aes(x = long, y = lat, group=group), color = "red",fill="transparent",size=1) +
+  geom_polygon(data = clust.dec_fort, aes(x = long, y = lat, group=group), color = "white",fill="transparent",size=1)
+#ggsave("figures/grid4_maps/Mean.change.CASP.grid4_change.viridis.poly_AR_5zeros_n20_60lat.png")
+
+# leaflet map to view interactive 'open street map' of what is in clusters
+#qpal<-colorQuantile("OrRd", exp(g@data$strata)-1, n=9) 
+qpal = colorFactor("OrRd",clusters@data$LISA_CL)
+
+leaflet() %>%
+  addPolygons(data=syncdiff.poly, stroke = T, fillOpacity = .5, smoothFactor = 0.2, color = "blue") %>%
+  addPolygons(data=clust.inc, stroke = T, fillOpacity = 0, smoothFactor = 0.2, color = "red") %>%
+  addTiles()
+
+#######################################
+###### who contributes to main increasing synchrony cluster?
+#######################################
 # who contributes to main increasing synchrony cluster?
 # make a list of the 13 grid cells in that cluster
 grid_inc = data.frame(grid=unique(filter(cluster_fort, LISA_CL==1)$id)) %>% 
@@ -1037,11 +1103,12 @@ who_inc = who_inc_data %>%
   arrange(desc(contribution))
 
 # make boxplots of syncdiff within the Semiarid Prairies cluster by species
-x11(13,9)
-who_inc_data %>%
+inc_plot = who_inc_data %>%
   left_join(who_inc, by = "sp.x") %>%
-  mutate(sp.x = fct_reorder(sp.x, med, .desc = T)) %>%
-  ggplot() +
+  mutate(sp.x = fct_reorder(sp.x, med, .desc = T)) 
+
+x11(13,9)
+ggplot(inc_plot) +
   geom_boxplot(aes(y = syncdiff, x = sp.x), fill="gray") +
   geom_segment(aes(
     y = 0,
@@ -1054,8 +1121,9 @@ who_inc_data %>%
        x = "") +
   theme_classic() +
   theme(axis.text.x = element_text(size=14),  axis.text.y = element_text(size=12),
-        axis.title.y = element_text(size = 15))
-ggsave("figures/pub_figs/increases_in_semiarid_prairie_cluster.jpg")
+        axis.title.y = element_text(size = 15)) +
+  scale_y_continuous(limits = c(-0.6,0.6))
+#ggsave("figures/pub_figs/increases_in_semiarid_prairie_cluster.jpg")
 
 # who contributes to main decreasing synchrony cluster?
 # make a list of the 13 grid cells in that cluster
@@ -1071,11 +1139,12 @@ who_dec = who_dec_data %>%
   arrange(desc(contribution))
 
 # make boxplots of syncdiff within the Semiarid Prairies cluster by species
-x11(13,9)
-who_dec_data %>%
+dec_plot = who_dec_data %>%
   left_join(who_dec, by = "sp.x") %>%
-  mutate(sp.x = fct_reorder(sp.x, med, .desc = T)) %>%
-  ggplot() +
+  mutate(sp.x = fct_reorder(sp.x, med, .desc = T))
+
+x11(13,9)
+ggplot(dec_plot) +
   geom_boxplot(aes(y = syncdiff, x = sp.x), fill="gray") +
   geom_segment(aes(
     y = 0,
@@ -1088,80 +1157,243 @@ who_dec_data %>%
        x = "") +
   theme_classic() +
   theme(axis.text.x = element_text(size=14),  axis.text.y = element_text(size=12),
-        axis.title.y = element_text(size = 15))
-ggsave("figures/pub_figs/sync_changes_in_Northeast_cluster.jpg")
+        axis.title.y = element_text(size = 15)) +
+  scale_y_continuous(limits = c(-0.6,0.6))
+#ggsave("figures/pub_figs/sync_changes_in_Northeast_cluster.jpg")
+
+### combining the inc and dec graphs (Fig 4 in pub)
+
+nrow(inc_plot); nrow(dec_plot)
+
+incdec_plot = bind_rows(inc_plot,dec_plot) %>%
+  mutate(cluster = c(rep("SGP",69), rep("NE", 61))) %>%
+  mutate(cluster = fct_reorder(cluster, c(rep(1,69),rep(2,61))),desc=T)
+
+# all on same plot
+x11(13,9)
+ggplot(incdec_plot) +
+  geom_boxplot(aes(y = syncdiff, x = sp.x, fill = cluster), position = "dodge", width=.75) +
+  scale_fill_manual(values = c("gray","white")) +
+  geom_segment(aes(
+    y = 0,
+    x = 0,
+    xend = 15,
+    yend = 0
+  ), color = "gray", size = 1.5, linetype = 2) +
+  geom_point(aes(y = syncdiff, x = sp.x, group=cluster), position=position_dodge(width = .75)) +
+  labs(y = "Change in synchrony (1966-1991 vs. 1992-2017)", x = "", fill="Cluster") +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=14, angle = 45, hjust=1),  axis.text.y = element_text(size=12),
+        axis.title.y = element_text(size = 15)) +
+  scale_y_continuous(limits = c(-0.6,0.6))
+#ggsave("figures/pub_figs/contributions_dodge.jpg")
+
+# facet of two plots next to each other
+
+# rename codes to be full species names
+incdec_plot2 = droplevels(incdec_plot) %>%
+  mutate(cluster = c(rep("Southern Great Plains",69), rep("Northeast", 61))) %>%
+  mutate(cluster = fct_reorder(cluster, c(rep(1,69),rep(2,61))),desc=T)
+
+levels(incdec_plot2$sp.x) =  
+  rev(c("Vesper Sparrow","Savannah Sparrow","Bobolink",
+        "N. Harrier","Upland Sandpiper","Ring-necked Pheasant",
+        "E. Meadowlark","Horned Lark","Dickcissel",
+        "Lark Bunting", "W. Meadowlark","Cassin's Sparrow",
+        "Grasshopper Sparrow","Long-billed Curlew"))
+
+x11(10,9)
+incdec_plot2 %>%
+  mutate(sp.x = fct_reorder(sp.x, med)) %>%
+ggplot() +
+  geom_violin(aes(y = syncdiff, x = sp.x),fill="lightgray",color="transparent") +
+  coord_flip() +
+  geom_segment(aes(y = 0, x = 0, xend = 15, yend = 0), 
+               color = "gray", size = 1.5, linetype = 2) +
+  geom_point(aes(y = syncdiff, x = sp.x, color = cluster),size=3) +
+  facet_wrap(~cluster) +
+  labs(y = "Change in synchrony (1966-1991 vs. 1992-2017)",
+       x = "") +
+  #cowplot::theme_cowplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=14, angle = 45, hjust=1),  
+        axis.text.y = element_text(size=12),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 15)) +
+  scale_y_continuous(limits = c(-0.6,0.5)) + 
+  scale_color_manual(values = c("firebrick","darkblue")) +
+  theme(legend.position = "none")
+#ggsave("figures/pub_figs/contributions_facet.jpg")
 
 #######################################
-###### plotting time series of contributing species in the hot-spots
+###### cross-synchrony of 6 main contributing species within the increasing SGP hotspot
 #######################################
 
 incclust = c("42_102", "40_102", "38_102", "36_102", "36_104", "38_100", "36_100", 
              "34_100", "32_100", "34_98", "32_98", "30_98")
+
 grsp.ts = bbsync("5460", 1966, 2017, "AR", "grid.year") %>%
-  filter(grid4 %in% incclust)
+  dplyr::filter(grid4 %in% incclust) %>%
+  mutate(sp = "GRSP")
 
 casp.ts = bbsync("5780", 1966, 2017, "AR", "grid.year") %>%
-  filter(grid4 %in% incclust)
+  filter(grid4 %in% incclust) %>%
+  mutate(sp = "CASP")
 
 hola.ts = bbsync("4740", 1966, 2017, "AR", "grid.year") %>%
-  filter(grid4 %in% incclust)
+  filter(grid4 %in% incclust) %>%
+  mutate(sp = "HOLA")
 
+weme.ts = bbsync("5011", 1966, 2017, "AR", "grid.year") %>%
+  filter(grid4 %in% incclust) %>%
+  mutate(sp = "WEME")
 
+dick.ts = bbsync("6040", 1966, 2017, "AR", "grid.year") %>%
+  filter(grid4 %in% incclust) %>%
+  mutate(sp = "DICK")
+
+larb.ts = bbsync("6050", 1966, 2017, "AR", "grid.year") %>%
+  filter(grid4 %in% incclust) %>%
+  mutate(sp = "LARB")
+
+# bind together time series data for all 6 species for cross-synchrony calculations
+cross.data = full_join(grsp.ts, casp.ts, by = "grid4.year") %>%
+  dplyr::select(grid4.year, GRSP = AR.x, CASP = AR.y) %>%
+  full_join(hola.ts, by = "grid4.year") %>%
+  dplyr::select(grid4.year, GRSP, CASP, HOLA = AR) %>%
+  full_join(weme.ts, by = "grid4.year") %>%
+  dplyr::select(grid4.year, GRSP, CASP, HOLA, WEME = AR) %>%
+  full_join(dick.ts, by = "grid4.year") %>%
+  dplyr::select(grid4.year, GRSP, CASP, HOLA, WEME, DICK = AR) %>%
+  full_join(larb.ts, by = "grid4.year") %>%
+  dplyr::select(grid4.year, GRSP, CASP, HOLA, WEME, DICK, LARB = AR) %>%
+  mutate(grid4 = ifelse(nchar(grid4.year)==10,substr(grid4.year,1,5),substr(grid4.year,1,6))) %>%
+  mutate(year = ifelse(nchar(grid4.year)==10,substr(grid4.year,7,10),substr(grid4.year,8,11)))
+
+# making a function to average data by year for all shared SGP cells for pairwise cross-correlations
+crosssync = function(sp1,sp2, yearstart, yearend){#sp1="DICK"; sp2="LARB"; yearstart = 1992; yearend = 2017
+sp1 = enquo(sp1)
+sp2 = enquo(sp2)
+pair = paste0(quo_name(sp1),".",quo_name(sp2))
+cor.format = cross.data %>%
+  filter(year>=yearstart, year<=yearend) %>%
+  drop_na(!!sp1, !!sp2) %>% 
+  group_by(year) %>%
+  summarise(n = length(grid4), mean1 := mean(!!sp1), mean2 := mean(!!sp2)) %>%
+  ungroup() %>%
+  mutate(pair = !!pair)
+return(cor.format)
+}
+
+# gathering together the 66-91 population data from SGP and running correlations
+crosssync.data.66.91 = bind_rows(
+  crosssync(GRSP, CASP, 1966, 1991),
+  crosssync(GRSP, WEME, 1966, 1991),
+  crosssync(GRSP, LARB, 1966, 1991),
+  crosssync(GRSP, DICK, 1966, 1991),
+  crosssync(GRSP, HOLA, 1966, 1991),
+  crosssync(CASP, WEME, 1966, 1991),
+  crosssync(CASP, LARB, 1966, 1991),
+  crosssync(CASP, DICK, 1966, 1991),
+  crosssync(CASP, HOLA, 1966, 1991),
+  crosssync(WEME, LARB, 1966, 1991),
+  crosssync(WEME, DICK, 1966, 1991),
+  crosssync(WEME, HOLA, 1966, 1991),
+  crosssync(LARB, DICK, 1966, 1991),
+  crosssync(LARB, HOLA, 1966, 1991),
+  crosssync(HOLA, DICK, 1966, 1991)
+)
+
+(
+  crosssync.sum.66.91 =
+    crosssync.data.66.91 %>%
+    group_by(pair) %>%
+    summarise(
+      r = cor.test(mean1, mean2)$estimate,
+      lcl = cor.test(mean1, mean2)$conf.int[1],
+      ucl = cor.test(mean1, mean2)$conf.int[2],
+      p = cor.test(mean1, mean2)$p.value,
+      n = mean(n)
+    ) %>%
+    ungroup()
+)
+
+# gathering together the 92-17 population data from SGP and running correlations
+crosssync.data.92.17 = bind_rows(
+  crosssync(GRSP, CASP, 1992, 2017),
+  crosssync(GRSP, WEME, 1992, 2017),
+  crosssync(GRSP, LARB, 1992, 2017),
+  crosssync(GRSP, DICK, 1992, 2017),
+  crosssync(GRSP, HOLA, 1992, 2017),
+  crosssync(CASP, WEME, 1992, 2017),
+  crosssync(CASP, LARB, 1992, 2017),
+  crosssync(CASP, DICK, 1992, 2017),
+  crosssync(CASP, HOLA, 1992, 2017),
+  crosssync(WEME, LARB, 1992, 2017),
+  crosssync(WEME, DICK, 1992, 2017),
+  crosssync(WEME, HOLA, 1992, 2017),
+  crosssync(LARB, DICK, 1992, 2017),
+  crosssync(LARB, HOLA, 1992, 2017),
+  crosssync(HOLA, DICK, 1992, 2017)
+)
+
+(
+  crosssync.sum.92.17 =
+    crosssync.data.92.17 %>%
+    group_by(pair) %>%
+    summarise(
+      r = cor.test(mean1, mean2)$estimate,
+      lcl = cor.test(mean1, mean2)$conf.int[1],
+      ucl = cor.test(mean1, mean2)$conf.int[2],
+      p = cor.test(mean1, mean2)$p.value,
+      n = mean(n)
+    ) %>%
+    ungroup()
+)
+
+#######################################
+###### plotting time series of contributing species in the increasing hot-spot
+#######################################
+
+# GRSP vs. Dickcissel
 x11(17,9)
-ggplot(filter(casp.ts, year<1992)) +
-  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
-  cowplot::theme_cowplot() +
-  labs(title = "Cassin's Sparrow, 1966-1991", y = "Annual growth rate, log(Nt/Nt-1)",
-       color="Grid cell\n(lat_lon)")
-ggsave("CASP_increasing_cluster_1966-1991.jpg")
+gd=crosssync(GRSP,DICK,1992,2017)
+gdlong = data.frame(pop = c(gd$mean1,gd$mean2), sp = c(rep("GRSP",26),rep("DICK",26)), year = c(gd$year,gd$year))
+ggplot(gdlong) +
+  geom_line(aes(x = as.numeric(year), y = pop, color=sp), size = 1.5) +
+  geom_line(aes(x = as.numeric(year), y = pop, color=sp), size = 1.5) +
+    cowplot::theme_cowplot() +
+  labs(title = "Grasshopper Sparrow / Dickcissel, 1992-2017", y = "Relative population change (AR1 residuals))")
+#ggsave("GRSP_DICK_ts_increasing_cluster_1992-2017.jpg")
 
-x11(17,9)
-ggplot(filter(casp.ts, year>1991)) +
-  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
-  cowplot::theme_cowplot() +
-  labs(title = "Cassin's Sparrow, 1992-2017", y = "Annual growth rate, log(Nt/Nt-1)",
-       color="Grid cell\n(lat_lon)") +
-  scale_x_continuous(breaks=c(1995,2000,2005,2010,2015)) +
-  scale_y_continuous(limits=c(-3,3), breaks=c(-3, -2, -1, 0, 1, 2, 3))
-ggsave("CASP_increasing_cluster_1992-2017.jpg")
 
-x11(17,9)
-ggplot(filter(hola.ts, year<1992)) +
-  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+x11(13,9)
+ggplot(gd) +
+  geom_point(aes(x = mean1, y = mean2), size = 6, alpha = 0.5, color = "darkgreen") +
+  geom_smooth(aes(x = mean1, y = mean2), method="lm", color = "darkgreen", fill = "darkgreen", alpha = 0.25) +
   cowplot::theme_cowplot() +
-  labs(title = "Horned Lark, 1966-1991", y = "Annual growth rate, log(Nt/Nt-1)",
-       color="Grid cell\n(lat_lon)") +
-  scale_y_continuous(limits=c(-.75,1.5), breaks=c(-1, -0.5, 0, 0.5, 1, 1.5))
-ggsave("HOLA_increasing_cluster_1966-1991.jpg")
+  labs(title = "Grasshopper Sparrow / Dickcissel, 1992-2017", y = "Dickcissel", x = "Grasshopper Sparrow")
+#ggsave("GRSP_DICK_scatter_inc_cluster_1992-2017.jpg")
 
+# CASP vs. Dickcissel
 x11(17,9)
-ggplot(filter(hola.ts, year>1991)) +
-  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+cd=crosssync(CASP,DICK,1992,2017)
+cdlong = data.frame(pop = c(cd$mean1,cd$mean2), sp = c(rep("CASP",26),rep("DICK",26)), year = c(cd$year,cd$year))
+ggplot(cdlong) +
+  geom_line(aes(x = as.numeric(year), y = pop, color=sp), size = 1.5) +
+  geom_line(aes(x = as.numeric(year), y = pop, color=sp), size = 1.5) +
   cowplot::theme_cowplot() +
-  labs(title = "Horned Lark, 1992-2017", y = "Annual growth rate, log(Nt/Nt-1)",
-       color="Grid cell\n(lat_lon)") +
-  scale_x_continuous(breaks=c(1995,2000,2005,2010,2015)) +
-  scale_y_continuous(limits=c(-.75,1.5), breaks=c(-1, -0.5, 0, 0.5, 1, 1.5))
-ggsave("HOLA_increasing_cluster_1992-2017.jpg")
+  labs(title = "Cassin's Sparrow / Dickcissel, 1992-2017", y = "Relative population change (AR1 residuals))")
+#ggsave("CASP_DICK_ts_increasing_cluster_1992-2017.jpg")
 
-x11(17,9)
-ggplot(filter(grsp.ts, year<1992)) +
-  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
-  cowplot::theme_cowplot() +
-  labs(title = "Grasshopper Sparrow, 1966-1991", y = "Annual growth rate, log(Nt/Nt-1)",
-       color="Grid cell\n(lat_lon)") +
-  scale_y_continuous(limits=c(-2,2), breaks=c(-2, -1, 0, 1, 2))
-ggsave("GRSP_increasing_cluster_1966-1991.jpg")
 
-x11(17,9)
-ggplot(filter(grsp.ts, year>1991)) +
-  geom_line(aes(x = year, y = change, color=grid4), size = 1.5) +
+x11(13,9)
+ggplot(cd) +
+  geom_point(aes(x = mean1, y = mean2), size = 6, alpha = 0.5, color = "darkgreen") +
+  geom_smooth(aes(x = mean1, y = mean2), method="lm", color = "darkgreen", fill = "darkgreen", alpha = 0.25) +
   cowplot::theme_cowplot() +
-  labs(title = "Grasshopper Sparrow, 1992-2017", y = "Annual growth rate, log(Nt/Nt-1)",
-       color="Grid cell\n(lat_lon)") +
-  scale_x_continuous(breaks=c(1995,2000,2005,2010,2015)) +
-  scale_y_continuous(limits=c(-2,2), breaks=c(-2, -1, 0, 1, 2))
-ggsave("GRSP_increasing_cluster_1992-2017.jpg")
+  labs(title = "Cassin's Sparrow / Dickcissel, 1992-2017", y = "Dickcissel (AR1 residuals)", x = "Cassin's Sparrow (AR1 residuals)")
+#ggsave("CASP_DICK_scatter_inc_cluster_1992-2017.jpg")
 
 #######################################
 ###### Links to data sources, code, papers, etc.

@@ -643,6 +643,35 @@ na +
   xlim(c(-142,-59))
 #ggsave("figures/grid4_maps/ALLsp.grid4_66.91_AR_5zeros_n20_60lat.png")
 
+#### mapping mean synchrony 1966-1991 and 1992-2017 (single species)
+x11(9,9)
+na +
+  geom_point(aes(x = grid_lon, y = grid_lat, color = corcat), size = 3, alpha = .7, data = filter(mapsync,per=="1966-1991",grid_lat<=59, sp=="DICK")) + 
+  scale_colour_manual(values = c("#ffffb2", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026", "#800026")) +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Mean\nsynchrony", x="", y="", title="Period 1") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59)) #+ guides(color=FALSE)
+#ggsave("figures/grid4_maps/DICKsp.grid4_66.91_AR_5zeros_n20_60lat_nolegend.png")
+
+x11(9,9)
+na +
+  geom_point(aes(x = grid_lon, y = grid_lat, color = corcat), size = 3, alpha = .7, data = filter(mapsync,per=="1992-2017",grid_lat<=59, sp=="DICK")) + 
+  scale_colour_manual(values = c("#ffffb2", "#fed976","#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026", "#800026")) +   
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Mean\nsynchrony", x="", y="", title="Period 2") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59)) #+ guides(color=FALSE)
+#ggsave("figures/grid4_maps/DICKsp.grid4_92.17_AR_5zeros_n20_60lat_nolegend.png")
+
 #######################################
 ###### mapping change in synchrony separately for each species
 #######################################
@@ -898,13 +927,14 @@ traits = dotplot_n %>%
 traits$phen = factor(traits$phen,levels(traits$phen)[c(2,1)])
 
 # model set for species-level traits vs. change in synchrony
-mass.mod = lm(Mean ~ log(mass), data = traits, weights=n); summary(mass.mod)
-mig.mod = lm(Mean ~ mig, data = traits, weights=n); summary(mig.mod)
-phen.mod = lm(Mean ~ phen, data = traits, weights=n); summary(phen.mod)
-glob.mod = lm(Mean ~ log(mass) + mig + phen, data = traits, weights = n); summary(glob.mod)
-null.mod = lm(Mean ~ 1, data = traits, weights=n); summary(null.mod)
+mass.mod = lm(Mean ~ log(mass), data = traits, weights=n); confint(mass.mod); summary(mass.mod)
+mig.mod = lm(Mean ~ mig, data = traits, weights=n); confint(mig.mod); summary(mig.mod)
+phen.mod = lm(Mean ~ phen, data = traits, weights=n); confint(phen.mod); summary(phen.mod)
+glob.mod = lm(Mean ~ log(mass) + mig + phen, data = traits, weights = n); confint(glob.mod); summary(glob.mod)
+null.mod = lm(Mean ~ 1, data = traits, weights=n); confint(null.mod); summary(null.mod)
 
-MuMIn::AICc(mass.mod, mig.mod,phen.mod,glob.mod,null.mod)
+(modcomp = MuMIn::AICc(mass.mod, mig.mod,phen.mod,glob.mod,null.mod))
+AIC(mass.mod, mig.mod,phen.mod,glob.mod,null.mod)
 
 phen.fit = 
   data.frame(

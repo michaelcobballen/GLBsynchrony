@@ -1,0 +1,615 @@
+---
+title: "Spatial synchrony of grassland birds"
+author: "Mike Allen"
+date: "November 22, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("scripts/GLBsynchrony_libraries.R") # loads all required libraries
+source("scripts/BBSync_function.R") #Load function that formats data for synchrony analyses
+load("data/bbsync.RData") # pre-loaded BBS and grassland bird syncrhony data
+# source("scripts/BBS_data_load.R") # Read in BBS data if needed (already loaded in bbsynch.Rdata)
+# source("scripts/GLB_processing.R") # Process GL Bird data if needed (already loaded in bbsynch.Rdata)
+load("data/cross.data.RData") # Read in timeseries data for Southern Great Plains
+
+# shapefile of Canada
+can = readOGR("data/province.shp") 
+canada.fort = ggplot2::fortify(can) %>%
+  filter(lat <60.0001)
+# Synchrony 'hotspot' shapefiles (local Moran's I cluster analyses performed in GeoDa)
+clusters = readOGR("data/meansyncdiff_cluster.shp")
+clust.dec = readOGR("data/decreasing_cluster_dissolve.shp")
+clust.inc = readOGR("data/increasing_cluster_dissolve.shp")
+cluster_fort = fortify(clusters, region = "grid") %>% left_join(rename(clusters@data,id=grid), by = "id")
+clust.dec_fort = fortify(clust.dec)
+clust.inc_fort = fortify(clust.inc)
+
+```
+# About
+This code summarizes route-level Breeding Bird Survey data into 2x2 degree grid-cells and analyzes spatial synchrony for 19 species of grassland birds. See Links at bottom for data sources, papers, etc.
+
+To do:
+  1. include raw "inclusion" variables (e.g., num zeros) into the final data 'outputs' 
+       - that way grid-cells can be excluded as needed on the fly in the final synchrony step without re-running entire code
+  2. incorporate a re-sampling / montecarlo test for the binned bar graphs and/or maps
+  3. fix function so it stops saying "Using grid4B ad id variables" and "NAs introduced by coercion"
+
+# Collect and process syncrony data for grassland bird species
+All objects from this step are pre-loaded into bbsync.Rdata.
+
+Creates the objects:
+
+  1. allsync: Combine function results (pairwise gridcell synchrony) for all species.
+  2. mapsync: Create moving average of all adjacent cells within 400 km (i.e., all 8 neighbors) for both  periods.
+  3. syncdiff: Calculate change in synchrony between periods for each species/grid cell.
+  4. meansyncdiff: Calculate mean change in synchrony across all GLB species by grid cell.
+
+These are already pre-loaded in bbsync.Rdata.  If needed, run the script "GLB_processing.R" above.
+
+# Number of grid-cell-pair synchrony estimates per species per period
+```{r}
+table(allsync$sp, allsync$per)
+```
+# Graph synchrony decay with distance (% positive correlations in distance bins)
+See Martin et al.
+```{r}
+allsync %>%
+  mutate(dcat2 = cut(
+  allsync$dist,
+  c(0, 200, 400, 600, 800, 1000,
+  1200, 1400, 1600, 1800, 2000, 100000),
+  labels = c(
+  "<200",
+  "201-400",
+  "401-600",
+  "601-800",
+  "801-1000",
+  "1001-1200",
+  "1201-1400",
+  "1401-1600",
+  "1601-1800",
+  "1801-2000",
+  ">2000"
+  )
+  )) %>%
+  mutate(pos = as.numeric(ifelse(cor > 0, 1, 0))) %>%
+  group_by(dcat2, sp, per) %>%
+  summarise(
+  pctsig = mean(sig1) * 100,
+  n = length(pos),
+  pctpos = mean(pos) * 100
+  ) %>%
+  ungroup() %>%
+  filter(sp %in% c("GRSP", "VESP", "SAVS"), n >= 50) %>%
+  ggplot() +
+  geom_abline(
+  slope = 0,
+  intercept = 50,
+  linetype = 2,
+  size = 1.5,
+  color = "darkgray"
+  ) +
+  geom_point(aes(y = pctpos, x = dcat2, color = log10(n)), size = 3.5) +
+  scale_y_continuous(limits = c(40, 80)) +
+  labs(x = "Distance (km)", y = "% positive correlations") +
+  theme_bw() +
+  facet_grid(rows = vars(sp), cols = vars(per)) +
+  theme(text = element_text(size = 15)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_color_viridis(option = "C")
+  
+  #NEXT: need to create n = 1000 null (random) distributions for each bin like Martin et al. to test spatial extent of synchrony.
+
+```
+
+# Graph synchrony decay with distance (continous)
+```{r}
+#X11(13,9)
+allsync %>%
+  filter(sp %in% c("GRSP", "HOLA", "VESP", "SEWR", "EAME", "WEME", "DICK", "BOBO", "UPSA", "SAVS",
+                   "LARB", "RNEP")) %>%
+  ggplot() + 
+  geom_smooth(aes(x=dist, y=cor, color = per), size = 2, method="glm", formula = y~log(x), se=T) +
+  facet_wrap(~sp, ncol = 4, scales = "free_y") +
+  xlim(c(0,2000)) +
+  theme_bw() +
+  theme(text = element_text(size=15)) +
+  theme(axis.text.x = element_text(size=10, angle = 45, vjust = .5)) +
+  labs(x = "Distance (km)", y = "Pearson's correlation", linetype = "Period", color = "Species") +
+  geom_abline(slope = 0, intercept = 0, color = "darkgray", linetype = 2, size = 1.5)
+# ggsave("figures/grid4_sync_scatter/EAME.GRSP.BOBO.SAVS_cor_grid4_66.17_no.se_AR_5zeros_n20.jpg")
+    # suggestion to use method="auto" as "loess" didn't have enough memory: https://groups.google.com/forum/#!topic/ggplot2/enavD18MmkY
+```
+
+# Make a base map of North America
+```{r}
+na <- ggplot() +
+  borders("world", xlim = c(-150, -60), ylim = c(35, 40), colour = "gray85", fill = "gray80")  +
+  borders("state", colour = "gray85", fill = "gray80") +
+  geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray85", fill = "gray80") +
+  theme_map() + 
+  coord_map('albers', lat0=30, lat1=60) #+
+  #xlim(c(-150,-60))
+```
+
+# Map mean synchrony for all grassland species individually (1992-2017) 
+Takes a long time.
+```{r}
+# x11(30,20)
+na +
+  geom_point(aes(x = grid_lon, y = grid_lat, color = corcat), size = 1, alpha = .7, data = filter(mapsync,per=="1992-2017",grid_lat<=59)) + 
+  scale_colour_manual(values = c("#ffffb2", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026", "#800026")) +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  facet_wrap(~sp) +
+  labs(colour="Mean\nsynchrony", x="", y="", title="1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59))
+# ggsave("figures/grid4_maps/ALLsp.grid4_92.17_AR_5zeros_n20_60lat.png")
+```
+
+# Map mean synchrony for all grassland species individually (1966-1991) 
+Takes a long time.
+```{r}
+# x11(30,20)
+na +
+  geom_point(aes(x = grid_lon, y = grid_lat, color = corcat), size = 1, alpha = .7, data = filter(mapsync,per=="1966-1991",grid_lat<=59)) + 
+  scale_colour_manual(values = c("#ffffb2", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026", "#800026")) +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  facet_wrap(~sp) +
+  labs(colour="Mean\nsynchrony", x="", y="", title="1966-1991") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59))
+#ggsave("figures/grid4_maps/ALLsp.grid4_66.91_AR_5zeros_n20_60lat.png")
+```
+
+# Map mean synchrony for a single species and time period (to make GIFs)
+For making GIFs. Make sure scales match between periods.
+```{r}
+# x11(9,9)
+na +
+  geom_point(aes(x = grid_lon, y = grid_lat, color = corcat), size = 3, alpha = .7, data = filter(mapsync,per=="1966-1991",grid_lat<=59, sp=="DICK")) + 
+  scale_colour_manual(values = c("#ffffb2", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026", "#800026")) +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Mean\nsynchrony", x="", y="", title="Period 1") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59)) #+ guides(color=FALSE)
+#ggsave("figures/grid4_maps/DICKsp.grid4_66.91_AR_5zeros_n20_60lat_nolegend.png")
+```
+
+# Map change in synchrony for all species individually (points, categorical)
+```{r}
+#x11(30,20)
+na +
+  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = diffcat), size = 1, alpha = .7, data = syncdiff) + 
+  scale_colour_manual(values = c("#053061","#5e4fa2","#3288bd","#66c2a5","#abdda4","#e6f598",
+                                 "#fee08b","#fdae61","#f46d43","#d53e4f","#9e0142", "#67001f")) +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  facet_wrap(~sp.x) +
+  labs(colour="Change in\nmean\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59))
+#ggsave("figures/grid4_maps/ALLsp.grid4_change_AR_5zeros_n20_60lat.png")
+```
+
+# Map mean change in synchrony for all species combined (points, categorical)
+```{r}
+#x11(13,9)
+na +
+  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = meandiffcat), size = 4, alpha = 1, data = meansyncdiff) + 
+  scale_colour_manual(values = c("#053061","#5e4fa2","#3288bd","#66c2a5","#abdda4","#e6f598",
+                                 "#fee08b","#fdae61","#f46d43","#d53e4f","#9e0142", "#67001f")) +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59))
+#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change_AR_5zeros_n20_60lat.png")
+```
+
+# Map mean change in synchrony for all species combined (points, continuous)
+```{r}
+#x11(13,9)
+na +
+  geom_point(aes(x = grid_lon.x, y = grid_lat.x, color = meansyncdiff), size = 4, alpha = 1, data = meansyncdiff) + 
+  scale_color_viridis(name = "Mean\nchange", option = "viridis") +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59))
+#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis_AR_5zeros_n20_60lat.png")
+```
+
+# Format grid-cell-level synchrony change data for plotting
+```{r}
+ridgeplotdata = syncdiff %>%
+  select(species = sp.x, syncdiff, incdec, grid_lon.x) %>%
+  bind_rows(select(meansyncdiff, species, syncdiff = meansyncdiff, incdec = meanincdec, grid_lon.x)) %>%
+  filter(species != "STGR" & species != "MCLO") %>%
+  mutate(region = ifelse(grid_lon.x <= -90, "West", "East")) %>%
+  group_by(species) %>%
+  mutate(medmeandiff = median(syncdiff), n = length(species), 
+         meanmeandiff = mean(syncdiff), sdmeandiff = sd(syncdiff), 
+         wtmeandiff = 1/(sdmeandiff^2)) %>%
+  ungroup() %>%
+  mutate(medmeandiff = as.numeric(ifelse(species == "All species","1",medmeandiff))) %>%
+  mutate(species = fct_reorder(species, medmeandiff, .desc = T)) %>%
+  mutate(fullsp = case_when(species == "EAME" ~ "E. Meadowlark",
+                            species == "SPPI" ~ "Sprague's Pipit",
+                            species == "NOHA" ~ "N. Harrier",
+                            species == "CCLO" ~ "Chestnut-col. Longspur",
+                            species == "GRSP" ~ "Grasshopper Sparrow",
+                            species == "UPSA" ~ "Upland Sandpiper",
+                            species == "RNEP" ~ "Ring-necked Pheasant",
+                            species == "VESP" ~ "Vesper Sparrow",
+                            species == "BOBO" ~ "Bobolink",
+                            species == "LESP" ~ "LeConte's Sparrow",
+                            species == "HOLA" ~ "Horned Lark",
+                            species == "SAVS" ~ "Savannah Sparrow",
+                            species == "WEME" ~ "W. Meadowlark",
+                            species == "LARB" ~ "Lark Bunting",
+                            species == "DICK" ~ "Dickcissel",
+                            species == "BAIS" ~ "Baird's Sparrow",
+                            species == "SEWR" ~ "Sedge Wren",
+                            species == "CASP" ~ "Cassin's Sparrow",
+                            species == "LBCU" ~ "Long-billed Curlew",
+                            species == "All species" ~ "All species"
+                            ))
+# rename codes to be full species names
+levels(ridgeplotdata$species) =  
+         rev(c("E. Meadowlark","Sprague's Pipit",
+            "N. Harrier","Chestnut-col. Longspur",
+            "Grasshopper Sparrow","Upland Sandpiper",
+            "Ring-necked Pheasant", "Vesper Sparrow",
+            "Bobolink", "LeConte's Sparrow", "Horned Lark",
+            "Savannah Sparrow", "W. Meadowlark",
+            "Lark Bunting", "Dickcissel",
+            "Baird's Sparrow","Sedge Wren", 
+            "Cassin's Sparrow", "Long-billed Curlew","All species"))
+
+
+# summary by species for plotting sample sizes and calculating weighted mean/CI
+ridgeplot_sum = ridgeplotdata %>%
+  arrange(desc(medmeandiff)) %>%
+  dplyr::select(species,medmeandiff,n,meanmeandiff,sdmeandiff,wtmeandiff) %>%
+  distinct() %>%
+  mutate(n = as.numeric(ifelse(species == "All species", "", n)))
+```
+
+# Linear mixed-effects model to find grand mean (and CI) change in synchrony among species
+```{r}
+lmedata = filter(ridgeplotdata, species != "All species")
+lmemod = lmer(syncdiff ~ 1 + (1|species), data = lmedata)
+allspmean = data.frame(mean = fixef(lmemod), 
+           se = sqrt(diag(vcov(lmemod, useScale = FALSE)))) %>%
+  mutate(ucl = mean + 2*se, lcl = mean - 2*se)
+```
+
+# Create ridgeplot of synchrony change by species
+```{r}
+#x11(10,9)
+ridgeplotdata %>% mutate(syncdiff = as.numeric(ifelse(species=="All species", NA, syncdiff))) %>%
+ggplot(aes(x = syncdiff, y = species, fill = ..x..), fill="gray") +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01, quantile_lines = TRUE, quantiles=2) +
+  scale_fill_viridis(name = "Mean\nchange", option = "viridis") +
+  labs(x = 'Change in spatial synchrony, 1966-1991 vs. 1992-2017', y = "") +
+  annotate("text", x = 0.754, y = (2:21)+0.5, 
+           label = c(paste0(ridgeplot_sum$n[2:20]),"grid cells (n) ="), 
+           hjust = 1, color = "gray25", size=3) +
+  theme_bw() +
+  xlim(c(-0.754,0.754)) +
+  geom_vline(aes(xintercept = 0), color="red", linetype = 2) +
+  theme(axis.text=element_text(size=12, color = "black"), axis.title=element_text(size=12)) +
+  geom_segment(aes(x = allspmean$lcl, y = 1.4, xend = allspmean$ucl, yend = 1.4), color="black", size = 1) +
+  geom_point(data=allspmean, aes(x = mean, y = 1.4), color="red", shape = 18, size = 3.5)
+#ggsave("figures/grid4_maps/ALLsp.grid4_change.ridgeline_AR_5zeros_n20_60latB.png")
+
+
+```
+
+# Create forest plot of synchrony change by species
+Means for each species and bootstrapped confidence intervals.
+
+https://stackoverflow.com/questions/38554383/bootstrapped-confidence-intervals-with-dplyr
+
+Note: should ultimately use "spatial block bootstrapping": https://sites.google.com/site/halkingwang/programming/r/spatiallycorrelatederrorsspatialblockbootstrappingbagoflittlebootstrapblb
+```{r}
+
+dotplotdata = ridgeplotdata %>%
+#  filter(species != "All species") %>%
+  group_by(species) %>%
+  do(data.frame(rbind(Hmisc::smean.cl.boot(.$syncdiff))))  %>%
+  ungroup() %>%
+  mutate(mean.order = as.numeric(ifelse(species == "All species","-1",Mean))) %>%
+  mutate(species = fct_reorder(species, mean.order, .desc = F)) %>%
+  # input overall mean and CI from the linear mixed-effect model intercept
+  mutate(Mean = as.numeric(ifelse(species == "All species",allspmean$mean,Mean))) %>%
+  mutate(Lower = as.numeric(ifelse(species == "All species",allspmean$lcl,Lower))) %>%
+  mutate(Upper = as.numeric(ifelse(species == "All species",allspmean$ucl,Upper)))
+
+dotplot_n = dotplotdata %>%
+  left_join(ridgeplot_sum, by = "species") %>%
+  dplyr::select(species, Mean, Lower, Upper, n) %>%
+  mutate(order = ifelse(species == "All species", -1, Mean)) %>%
+  arrange(desc(order)) %>%
+  mutate(n = ifelse(species == "All species", "", n))
+  
+#x11(10,9)
+ggplot(data = dotplotdata) +
+  geom_vline(aes(xintercept = 0), color="red", linetype = 2, size = 1.5) +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper, y = species, height = .2)) +
+  geom_point(aes(x = Mean, y = species, color = Mean), size = 4.5) +
+  scale_color_viridis(name = "Mean\nchange", option = "viridis",limits=c(-.1,.21)) +
+  labs(x = 'Change in spatial synchrony, 1966-1991 vs. 1992-2017', y = "") +
+  annotate("text", x = 0.48, y = c(20.4,20:1), 
+           label = c("",paste0(dotplot_n$n[1:20])), 
+           hjust = 1, color = "gray25", size=4) +
+  annotate("text", x = 0.43, y = 20, label = "n = ", color = "gray25") +
+  xlim(c(-0.3,0.48)) +
+  theme_bw() +
+  theme(axis.text=element_text(size=12, color = "black"), axis.title=element_text(size=12,color="black"))
+#ggsave("figures/grid4_maps/ALLsp.grid4_change.forestplot_AR_5zeros_n20.png")
+```
+# Data prep for species traits vs. change in syncrhony
+Migratory status based on BBS guild classifications: 
+https://www.mbr-pwrc.usgs.gov/bbs/guild/guildlst.html (also used by Zuckerberg et al. 2009)
+    # note: Ring-necked Pheasant is coded as "Short" (it is actually Res) to combine those categories.
+    Trend info from # https://www.mbr-pwrc.usgs.gov/cgi-bin/tf15.pl
+
+```{r}
+traits = dotplot_n %>%
+  filter(species != "All species") %>%
+  mutate(mig = c("Neo","Short","Short","Neo","Neo","Neo","Short","Short","Short","Short",
+                 "Neo","Neo","Short","Short","Neo","Short","Short","Short","Short")) %>%
+  mutate(ord = c("non",rep("pas",10),"non","non",rep("pas",3),"non","pas","pas")) %>%
+  mutate(firstegg = c("Apr 1-15","Jul 15-31","Jun 1-15","Jun 1-15","May 15-31","May 15-31","May 1-15",
+                       "May 15-31","Jun 1-15","Mar 15-31","May 15-31","May 1-15","Apr 15-30",
+                       "May 1-15","Jun 1-15","May 1-15","Apr 15-30","May 1-15","May 15-31")) %>%
+  mutate(phen = as.factor(c("before 15 May",rep("after 15 May",5),"before 15 May",rep("after 15 May",2),"before 15 May","after 15 May",rep("before 15 May",3),"after 15 May",
+                  rep("before 15 May",3),"after 15 May"))) %>%
+  mutate(massL = c(640.1, 18.3, 7.73, 17.8, 35.9, 25.2, 89.4, 13, 19.7, 104.4, 28.7, 151, 
+                    917, 20.3, 17.34, 24.9, 336, 100.1, 23.6)) %>% # avg. mass of the smaller sex (largest n on breeding grounds, BNA); or pooled avg. if sample size larger
+  mutate(massU = c(758.6, 18.3, 8.25, 19.1, 38.5, 28.5, 106, 13.2, 19.7, 111.3, 33, 164, 
+                    1263, 20.3, 18.75, 26.5, 513, 123.2, 23.9)) %>% # avg. mass of the larger sex (largest n on breeding grounds, BNA); or pooled avg. if sample size larger
+  mutate(mass = (massL + massU)/2) %>%
+  dplyr::select(-massL, -massU) %>%
+  mutate(trend.66.15 = c(0.17,-0.75,0.40,-2.17,-2.90,-0.36,-1.29,-2.59,-1.36,-2.46,-2.06,0.40,
+                         -0.64,-4.19,-2.52,-0.85,-1.21,-3.28,-3.10)) %>%
+  mutate(trend.66.91 = c(-0.40,-0.98,0.07,-1.92,-4.74,-1.04,-1.51,-1.93,-1.63,-2.47,-3.15,0.08,
+                         -1.31,-4.56,-2.93,-1.06,-1.83,-3.48,-3.20)) %>%
+  mutate(trend.92.15 = c(1.17,-1.21,0.62,-2.39,-1.46,0.18,-1.10,-2.39,-1.27,-2.35,-0.80,0.70,0.02,
+                         -4.18,-2.01,-0.67,-1.10,-3.24,-2.18)) %>%
+  mutate(trend.change = trend.92.15 - trend.66.91) %>%
+  mutate(n = as.numeric(n))
+
+traits$phen = factor(traits$phen,levels(traits$phen)[c(2,1)])
+```
+
+# Model set for species-level traits vs. change in synchrony 
+```{r}
+mass.mod = lm(Mean ~ log(mass), data = traits, weights=n)
+mig.mod = lm(Mean ~ mig, data = traits, weights=n)
+phen.mod = lm(Mean ~ phen, data = traits, weights=n)
+glob.mod = lm(Mean ~ log(mass) + mig + phen, data = traits, weights = n)
+null.mod = lm(Mean ~ 1, data = traits, weights=n)
+
+(modcomp = AICc(mass.mod, mig.mod,phen.mod,glob.mod,null.mod))
+```
+# Info for best performing species trait model (phenology):
+```{r}
+summary(phen.mod); confint(phen.mod)
+```
+
+# Plot phenology vs. change in synchrony
+```{r}
+phen.fit = 
+  data.frame(
+  fit = predict(phen.mod, se.fit = T, newdata = data.frame(phen = c("before 15 May","after 15 May")))$fit,
+  se = predict(phen.mod, se.fit = T, newdata = data.frame(phen = c("before 15 May","after 15 May")))$se.fit,
+  phen = c("before 15 May","after 15 May"),
+  type = c(1,2)
+  ) %>%
+  mutate(fitU = fit + 2*se, fitL = fit - 2*se)
+  
+#x11(9,9)
+ggplot(traits) +
+  geom_point(aes(x=phen, y = Mean, size = as.numeric(n)),shape=16, color="black",alpha = 0.25) +
+  geom_point(aes(x=phen, y = Mean, size = as.numeric(n)),shape=1, color="black",alpha = 1) +
+  geom_errorbar(data=phen.fit, stat = "identity", aes(x = type+0.1, y=fit, ymin=fitL,ymax=fitU), 
+                color="firebrick",alpha = 1, width=0.1) +
+  geom_point(data=phen.fit, aes(x = type+0.1, y=fit), color="firebrick",size = 4) +
+  cowplot::theme_cowplot() +
+  labs(size = "n", x = "Nesting phenology (start peak egg laying)", y = "Change in spatial synchrony") 
+  
+#ggsave("species.traits.vs.change.synchrony2.jpg")
+```
+
+# Map of mean change in synchrony across species with Moran's I cluster analysis
+```{r}
+# Make a grid of spatial polygons to match up with meansyncdiff data
+rr <- raster::raster(ext = raster::extent(-177, -52, 24, 69), res=c(2,2))
+raster::values(rr) <- 1:raster::ncell(rr)
+p <- raster::rasterToPolygons(rr)
+attributes = tibble(grid4_lon = coordinates(p)[,1], grid4_lat = coordinates(p)[,2]) %>%
+  mutate(join = 1, grid.x = paste(trunc(grid4_lat),trunc(grid4_lon),sep="")) %>%
+  mutate(grid.x = gsub("-","_",grid.x)) %>%
+  left_join(meansyncdiff, by="grid.x") 
+
+p$grid = attributes$grid.x
+p$meansyncdiff = attributes$meansyncdiff
+p$n = attributes$n
+p$meandiffcat = attributes$meandiffcat
+
+meansyncdiff.poly = p[is.na(p$n)!=T,]
+
+# Save this as a shapefile?
+# writeOGR(meansyncdiff.poly, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "meansyncdiff_poly", driver="ESRI Shapefile")
+
+meansyncdiff.data = fortify(meansyncdiff.poly, region = "grid") %>%
+  left_join(rename(meansyncdiff.poly@data, id=grid),by = "id")
+
+#x11(13,9)
+na + geom_polygon(data=meansyncdiff.data, aes(x=long, y = lat, group=group, fill = meansyncdiff)) + 
+  scale_fill_viridis(name = "Mean\nchange", option = "viridis") +
+  theme_classic() +
+  theme(text = element_text(size=15)) +
+  labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1966-1991 vs. 1992-2017") + 
+  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
+  theme(legend.title.align=0.5) +
+  theme(axis.line = element_line(color = "transparent")) +
+  xlim(c(-142,-59)) +
+  geom_polygon(data = clust.inc_fort, aes(x = long, y = lat, group=group), color = "black",fill="transparent",size=1) +
+  geom_polygon(data = clust.dec_fort, aes(x = long, y = lat, group=group), color = "white",fill="transparent",size=1)
+#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis.poly_AR_5zeros_n20_60lat.png")
+```
+# Leaflet map of cluster plus grid of mean change in synchrony across species
+```{r}
+#qpal<-colorQuantile("OrRd", exp(g@data$strata)-1, n=9) 
+#qpal = colorFactor("OrRd",clusters@data$LISA_CL)
+
+bins <- c(-1, 0, .10, .20, .30, .4, .5, Inf)
+pal <- colorBin("YlOrRd", domain = meansyncdiff.poly$meansyncdiff, bins = bins)
+
+leaflet() %>%
+  addPolygons(data=meansyncdiff.poly, stroke = T, fillColor = ~pal(meansyncdiff), 
+              fillOpacity = .5, smoothFactor = 0.2, opacity = 1, color = "white", weight = 2, dashArray = 3) %>%
+  addPolygons(data=clust.inc, stroke = T, fillOpacity = 0, smoothFactor = 0.2, color = "red") %>%
+  addTiles()
+```
+
+# Which species contribute to main increasing synchrony cluster?
+Make a list of the 13 grid cells in the increasing cluster. Then count the number of grid cells (out of 13) occupied by each species.
+```{r}
+# make list of cells in increasing cluster
+grid_inc = data.frame(grid=unique(filter(cluster_fort, LISA_CL==1)$id)) %>% 
+  filter(grid != "50_96") # exclude the single-cell cluster
+
+# count the number of grid cells (out of 13) occupied by each species
+who_inc_data = syncdiff %>%
+  filter(grid.x %in% grid_inc$grid) 
+
+(who_inc = who_inc_data %>%
+  group_by(sp.x) %>%
+  summarise(contribution = length(sp.x), med = median(syncdiff)) %>%
+  arrange(desc(contribution)))
+```
+
+# Which species contribute to main decreasing synchrony cluster?
+```{r}
+# make a list of the 13 grid cells in that cluster
+grid_dec = data.frame(grid=unique(filter(cluster_fort, LISA_CL==2)$id)) %>% 
+  filter(grid != "44_66")
+# count the number of grid cells (out of 12) occupied by each species
+who_dec_data = syncdiff %>%
+  filter(grid.x %in% grid_dec$grid)
+
+(who_dec = who_dec_data %>%
+  group_by(sp.x) %>%
+  summarise(contribution = length(sp.x), med = median(syncdiff)) %>%
+  arrange(desc(contribution)))
+```
+
+
+# Graph of synchrony changes in increasing and decreasing clusters (dotplots, facets)
+```{r}
+# data for plot: syncdiff within the Semiarid Prairies increasing cluster by species
+inc_plot = who_inc_data %>%
+  left_join(who_inc, by = "sp.x") %>%
+  mutate(sp.x = fct_reorder(sp.x, med, .desc = T)) 
+
+# data for plot: syncdiff within the Northeast decreasing cluster by species
+dec_plot = who_dec_data %>%
+  left_join(who_dec, by = "sp.x") %>%
+  mutate(sp.x = fct_reorder(sp.x, med, .desc = T))
+
+incdec_plot = bind_rows(inc_plot,dec_plot) %>%
+  mutate(cluster = c(rep("SGP",69), rep("NE", 61))) %>%
+  mutate(cluster = fct_reorder(cluster, c(rep(1,69),rep(2,61))),desc=T)
+  
+incdec_plot2 = droplevels(incdec_plot) %>%
+  mutate(cluster = c(rep("Southern Great Plains",69), rep("Northeast", 61))) %>%
+  mutate(cluster = fct_reorder(cluster, c(rep(1,69),rep(2,61))),desc=T)
+
+levels(incdec_plot2$sp.x) =  
+  rev(c("Vesper Sparrow","Savannah Sparrow","Bobolink",
+        "N. Harrier","Upland Sandpiper","Ring-necked Pheasant",
+        "E. Meadowlark","Horned Lark","Dickcissel",
+        "Lark Bunting", "W. Meadowlark","Cassin's Sparrow",
+        "Grasshopper Sparrow","Long-billed Curlew"))
+
+#x11(10,9)
+incdec_plot2 %>%
+  mutate(sp.x = fct_reorder(sp.x, med)) %>%
+ggplot() +
+  geom_violin(aes(y = syncdiff, x = sp.x),fill="lightgray",color="transparent") +
+  coord_flip() +
+  geom_segment(aes(y = 0, x = 0, xend = 15, yend = 0), 
+               color = "gray", size = 1.5, linetype = 2) +
+  geom_point(aes(y = syncdiff, x = sp.x, color = cluster),size=3) +
+  facet_wrap(~cluster) +
+  labs(y = "Change in synchrony (1966-1991 vs. 1992-2017)",
+       x = "") +
+  #cowplot::theme_cowplot() +
+  theme_bw() +
+  theme(axis.text.x = element_text(size=14, angle = 45, hjust=1),  
+        axis.text.y = element_text(size=12),
+        axis.title.y = element_text(size = 15),
+        axis.title.x = element_text(size = 15)) +
+  scale_y_continuous(limits = c(-0.6,0.5)) + 
+  scale_color_manual(values = c("firebrick","darkblue")) +
+  theme(legend.position = "none")
+#ggsave("figures/pub_figs/contributions_facet.jpg")
+```
+
+# Make maps and shapefiles of bird grids if needed
+```{r, echo=T}
+#grsp.map = bbsync("5460", 1992, 2017, "AR", "grid.map")
+#plot(grsp.map, col = "gray")
+# writeOGR(grsp.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "grsp_grid4_poly_lamb.92.17", driver="ESRI Shapefile")
+
+#bobo.map = bbsync("4940", 1992, 2017, "AR", "grid.map")
+#plot(bobo.map, col = "gray")
+# writeOGR(bobo.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "bobo_grid4_poly_lamb.92.17", driver = "ESRI Shapefile")
+
+#eame.map = bbsync("5010",1992,2017,"AR","grid.map"); x11(13,9); plot(eame.map,col="gray")
+# writeOGR(eame.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "eame_grid4_poly_lamb.92.17", driver="ESRI Shapefile")
+
+#savs.map = bbsync("5420",1992,2017,"AR","grid.map"); x11(13,9); plot(savs.map,col="gray")
+# writeOGR(savs.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "savs_grid4_poly_lamb.92.17", driver="ESRI Shapefile")
+
+#casp.map = bbsync("5780",1992,2017,"AR","grid.map"); x11(13,9); plot(savs.map,col="gray")
+# writeOGR(savs.map, "C:\\Users\\Mike\\Documents\\Research\\Chapter 3 - Synchrony\\GLBsynchrony\\data", "casp_grid4_poly_lamb.92.17", driver="ESRI Shapefile")
+```
+
+# Links to data sources, code, papers, etc.
+1. List of grassland bird species: https://www.mbr-pwrc.usgs.gov/bbs/grass/actlist.htm
+2. BBS Route-level data fields: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/Summary.txt
+3. BBS RouteID info: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/RegionCodes.txt
+4. BBS phys strata map: https://www.pwrc.usgs.gov/bbs/StrataNames/strata_map_small.htm
+5. BBS Route info txt with BCR and strata codes: ftp://ftpext.usgs.gov/pub/er/md/laurel/BBS/DataFiles/RouteInf.txt
+6. BBS BCR shapefile: http://www.pwrc.usgs.gov/bba/index.cfm?fa=bba.getdata
+7. Smith et al. sup data for CAR model and indices of aerial insectivores:
+      https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0130768#sec016
+      https://journals.plos.org/plosone/article/file?id=10.1371/journal.pone.0130768.s005&type=supplementary
+8. Michel et al. README file:       https://datadryad.org/bitstream/handle/10255/dryad.96773/README.txt?sequence=2
+9. Michel et al. paper with link to sup code files: https://onlinelibrary.wiley.com/doi/abs/10.1111/ecog.01798
+

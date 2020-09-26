@@ -1,13 +1,13 @@
 .Rproj.user
 .Rhistory
 .RData
-bbsync.RData
 .Ruserdata
 old/
 random/
-lit/
 writing/
 mapping/
 data/
 figures/
 data/
+scripts/amarel/
+scripts/old_scripts

@@ -1,2 +1,0 @@
-Sorry something went wrong in procedure Index in module BugsEvaluate
-multiple definitions of node lambda[1]

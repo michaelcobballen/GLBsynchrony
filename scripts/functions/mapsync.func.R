@@ -1,6 +1,11 @@
 # Note: this code may run quicker when not packaged into a function for some reason
 # Note: parallel processing speeded it up, but stopped working correctly somewhere along the line (weird values)
 
+# for testing
+# spcode = "bais"
+# startyr = 1994
+# endyr = 2019
+
 mapsync = function(spcode,
                    startyr,
                    endyr,
@@ -13,7 +18,7 @@ mapsync = function(spcode,
                    maxzeros = 5,
                    other.metrics = F, # logical indicating whether to calculate mean abundance, mean variance, mean trend in addition to mean synchrony
                    posterior.data.loc = "data/index_posteriors/",
-                   jags.data.loc = "data/raw_counts/",
+                   jags.data.loc = "data/jags/",
                    save.to = "data/mapsync_iterations/") {
   
 
@@ -31,10 +36,10 @@ zero.check = read.csv(paste0(
   ".jags.csv"
 )) %>%
   group_by(strat_name, r_year) %>%
-  summarise(mean.count = mean(count)) %>%
+  summarise(mean.count = mean(count)) %>% # average route-level counts by grid/year
   ungroup() %>%
   group_by(strat_name) %>%
-  summarise(zeros = sum(mean.count == 0)) %>%
+  summarise(zeros = sum(mean.count == 0)) %>% # count how many "zero years" per grid
   ungroup() %>%
   mutate(exclude = case_when(zeros > maxzeros ~ 1,
                              TRUE ~ 0),

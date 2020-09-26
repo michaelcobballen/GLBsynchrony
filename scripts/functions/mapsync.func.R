@@ -11,9 +11,9 @@ mapsync = function(spcode,
                    uncertainty = T,
                    # logical indicating whether to use the whole posterior or just the median value per grid cell / year
                    maxzeros = 5,
-                   all.methods = F,
+                   other.metrics = F, # logical indicating whether to calculate mean abundance, mean variance, mean trend in addition to mean synchrony
                    posterior.data.loc = "data/index_posteriors/",
-                   rawcount.data.loc = "data/raw_counts/",
+                   jags.data.loc = "data/raw_counts/",
                    save.to = "data/mapsync_iterations/") {
   
 
@@ -22,20 +22,23 @@ if(uncertainty == F){n.iter = 1}
 # reading in summary of raw data within grid cells including average counts
 # this allows excluding based on number of zero counts
 zero.check = read.csv(paste0(
-  rawcount.data.loc,
+  jags.data.loc,
   spcode,
   ".",
   substr(startyr, 3, 4),
   ".",
   substr(endyr, 3, 4),
-  ".rawcount.warnings.csv"
+  ".jags.csv"
 )) %>%
-  group_by(Stratum) %>%
+  group_by(strat_name, r_year) %>%
+  summarise(mean.count = mean(count)) %>%
+  ungroup() %>%
+  group_by(strat_name) %>%
   summarise(zeros = sum(mean.count == 0)) %>%
   ungroup() %>%
   mutate(exclude = case_when(zeros > maxzeros ~ 1,
                              TRUE ~ 0),
-         grid = Stratum) %>%
+         grid = strat_name) %>%
   dplyr::select(grid, exclude)
 
 # read in posterior distributions for each grid cell / year 
@@ -111,55 +114,7 @@ lin.func = function(x) {
   return(lots.lin)
 }
 
-# a function to linear detrend each time series (log transformed)
-lin.l.func = function(x) {
-  lots.c = as.numeric(do.call("rbind", x[1:(ncol(x)-2)])) # n.grid = number of grid cells
-  lots.mat = log(matrix(lots.c, ncol = (ncol(x)-2), byrow = T)) # n.grid = number of grid cells
-  lots.lin = apply(lots.mat, 2L, function(y) resid(lm(y~c(1:26))))
-  return(lots.lin)
-}
-
-# a function to calculate ar1 residuals for each time series
-ar1.func = function(x) {
-  lots.c = as.numeric(do.call("rbind", x[,(1:(ncol(x)-2))]))
-  lots.mat = matrix(lots.c, ncol = (ncol(x)-2), byrow = T) # n.grid = number of grid cells
-  lots.ar1 = apply(lots.mat, 2L, function(y) resid(lm(y~lag(y)))) # previously used arima() but sometimes threw singularity errors: c(arima(y, order = c(1,0,0), method="ML")$resid
-  return(lots.ar1)
-}
-
-# a function to calculate ar1 residuals for each time series (log transformed)
-ar1.l.func = function(x) {
-  lots.c = as.numeric(do.call("rbind", x[,(1:(ncol(x)-2))]))
-  lots.mat = log(matrix(lots.c, ncol = (ncol(x)-2), byrow = T)) # n.grid = number of grid cells
-  lots.ar1 = apply(lots.mat, 2L, function(y) resid(lm(y~lag(y)))) # previously used arima() but sometimes threw singularity errors: c(arima(y, order = c(1,0,0), method="ML")$resid
-  return(lots.ar1)
-}
-
-# a function to take the first difference of each time series
-dif.func = function(x) {
-  lots.c = as.numeric(do.call("rbind", x[1:(ncol(x)-2)])) # n.grid = number of grid cells
-  lots.mat = matrix(lots.c, ncol = (ncol(x)-2), byrow = T) # n.grid = number of grid cells
-  lots.dif = apply(lots.mat, 2L, function(y) diff(y))
-  return(lots.dif)
-}
-
-# a function to take the first difference of each time series (log transformed)
-dif.l.func = function(x) {
-  lots.c = as.numeric(do.call("rbind", x[1:(ncol(x)-2)])) # n.grid = number of grid cells
-  lots.mat = log(matrix(lots.c, ncol = (ncol(x)-2), byrow = T)) # n.grid = number of grid cells
-  lots.dif = apply(lots.mat, 2L, function(y) diff(y))
-  return(lots.dif)
-}
-
 lin.list <- lapply(lots.df.split, lin.func)
-
-if (all.methods == T) {
-  lin.l.list <- lapply(lots.df.split, lin.l.func)
-  ar1.list <- lapply(lots.df.split, ar1.func)
-  ar1.l.list <- lapply(lots.df.split, ar1.l.func)
-  dif.list <- lapply(lots.df.split, dif.func)
-  dif.l.list <- lapply(lots.df.split, dif.l.func)
-}
 
 # create correlation matrix among all grid cells (linear detrend, and ar1 and diff methods if called)
 lin.cor = lapply(lin.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$r)
@@ -175,13 +130,6 @@ dif.l.cor = lapply(dif.l.list, function(x) psych::corr.test(x, adjust = "none", 
 
 # combine all iterations of the linear and (if called for) AR1 and differenced detrended correlation matrices
 lin.cor.mat = do.call("rbind", lin.cor)
-if(all.methods == T){
-lin.l.cor.mat = do.call("rbind", lin.l.cor)
-ar1.cor.mat = do.call("rbind", ar1.cor)
-ar1.l.cor.mat = do.call("rbind", ar1.l.cor)
-dif.cor.mat = do.call("rbind", dif.cor)
-dif.l.cor.mat = do.call("rbind", dif.l.cor)
-}
 
 # combine all matrices into a "long" data.frame with grid labels
 gridA = rep(unique(post$grid), n.grid)

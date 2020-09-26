@@ -148,9 +148,9 @@ mapsync(
   n.post = 3000, # number of posterior samples that exist for each population estimate
   uncertainty = T, # if TRUE, creates n.iter data sets resampled from the posteriors; if FALSE, creates one data set from posterior medians
   maxzeros = 5, # sets the maximum number of zeros (in raw count data) to allow within each grid cell time series
-  all.methods = F, # compute mean synchrony with linear detrending (F) or also using other methods (autoregressive and differencing) and log/non-log values (T)
+  other.metrics = F, # logical indicating whether to calculate mean abundance, mean variance, mean trend in addition to mean synchrony
   posterior.data.loc = "data/index_posteriors/",
-  rawcount.data.loc = "data/raw_counts/",
+  jags.data.loc = "data/jags/",
   save.to = "data/mapsync_iterations/"
 )
 #####################################
@@ -197,41 +197,6 @@ names(mapsync.iterations) <-   paste0(species$spcode,
                                       substr(species$startyr, 3, 4),
                                       ".",
                                       substr(species$endyr, 3, 4))
-```
-# 4.3. Read in mean raw counts to use for data filtering
-Allows filtering out grid cells with more than a threshold number of zeros per time series.
-```{r}
-# make a list of files containing the raw count data sets
-rawcount.files = sprintf(
-  "data//jags//%s.jags.csv",
-  paste0(
-    species$spcode,
-    ".",
-    substr(species$startyr, 3, 4),
-    ".",
-    substr(species$endyr, 3, 4)
-  )
-)
-
-# read in all raw count data into list form
-rawcount.list = lapply(rawcount.files, function(x)
-  read.csv(x))
-names(rawcount.list) <-   paste0(species$spcode,
-                                 ".",
-                                 substr(species$startyr, 3, 4),
-                                 ".",
-                                 substr(species$endyr, 3, 4))
-
-# create data frame of mean raw counts by species, period, grid cell, and year
-rawsum = do.call("rbind", rawcount.list) %>%
-  mutate(id = substr(row.names(do.call("rbind", rawcount.list)), 1, 10)) %>%
-  group_by(id, strat_name, r_year) %>%
-  summarise(mean.count = mean(count)) %>%
-  ungroup() %>%
-  rename(Stratum = strat_name, Year = r_year)
-
-rm(rawcount.list)
-rm(rawcount.files)
 ```
 ## 4.2. Subset only grid cells with adequate data from both time periods
 ```{r}

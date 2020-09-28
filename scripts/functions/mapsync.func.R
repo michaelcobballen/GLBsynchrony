@@ -2,9 +2,17 @@
 # Note: parallel processing speeded it up, but stopped working correctly somewhere along the line (weird values)
 
 # for testing
-# spcode = "bais"
-# startyr = 1994
-# endyr = 2019
+#spcode = "bais"
+#startyr = 1994
+#endyr = 2019
+#n.iter = 3000
+#n.post = 3000
+#uncertainty = T
+#maxzeros = 5
+#other.metrics = T
+#posterior.data.loc = "data/index_posteriors/"
+#jags.data.loc = "data/jags/"
+#save.to = "data/mapsync_iterations/" 
 
 mapsync = function(spcode,
                    startyr,
@@ -113,28 +121,72 @@ lots.df.split = split(lots.df, lots.df$iteration)
 
 # a function to linear detrend each time series
 lin.func = function(x) {
-  lots.c = as.numeric(do.call("rbind", x[1:(ncol(x)-2)])) # n.grid = number of grid cells
-  lots.mat = matrix(lots.c, ncol = (ncol(x)-2), byrow = T) # n.grid = number of grid cells
+  lots.c = as.numeric(do.call("rbind", x[1:(ncol(x)-2)])) 
+  lots.mat = matrix(lots.c, ncol = (ncol(x)-2), byrow = T) 
   lots.lin = apply(lots.mat, 2L, function(y) resid(lm(y~c(1:26))))
   return(lots.lin)
 }
 
 lin.list <- lapply(lots.df.split, lin.func)
 
-# create correlation matrix among all grid cells (linear detrend, and ar1 and diff methods if called)
+if(other.metrics == T) {
+  # a function to take the mean of each time series (for when "other.metrics" = T)
+  mean.func = function(x) {
+    lots.c = as.numeric(do.call("rbind", x[1:(ncol(x) - 2)]))
+    lots.mat = matrix(lots.c, ncol = (ncol(x) - 2), byrow = T)
+    lots.mean = colMeans(lots.mat, 1L)
+    return(matrix(lots.mean, 1, 15))
+  }
+  
+  mean.list <- lapply(lots.df.split, mean.func)
+  
+  # a function to calculate variance of each detrended time series (for when "other.metrics" = T)
+  var.func = function(x) {
+    lots.var = apply(x, 2L, var)
+    return(matrix(lots.var, 1, 15))
+  }
+  
+  var.list <- lapply(lin.list, var.func)
+  
+  # a function to extract the linear trend coefficient from each time series
+  trend.func = function(x) {
+    lots.c = as.numeric(do.call("rbind", x[1:(ncol(x) - 2)]))
+    lots.mat = matrix(lots.c, ncol = (ncol(x) - 2), byrow = T)
+    lots.trend = apply(lots.mat, 2L, function(y)
+      coef(lm(y ~ c(1:26)))[2])
+    return(matrix(lots.trend, 1, 15))
+  }
+  
+  trend.list <- lapply(lots.df.split, trend.func)
+}
+
+# create correlation matrix among all grid cells (of linear detrended time series)
 lin.cor = lapply(lin.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$r)
 lin.cor.n = lapply(lin.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$n)
 if(min(as.vector(do.call("rbind",lin.cor.n)))<20){warning("At least one grid pair had n < 20 for correlations")}
-if(all.methods == T){
-lin.l.cor = lapply(lin.l.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$r)
-ar1.cor <- lapply(ar1.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$r)
-ar1.l.cor <- lapply(ar1.l.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$r)
-dif.cor = lapply(dif.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$r)
-dif.l.cor = lapply(dif.l.list, function(x) psych::corr.test(x, adjust = "none", ci = F)$r)
-}
 
-# combine all iterations of the linear and (if called for) AR1 and differenced detrended correlation matrices
+# combine all iterations of the linear detrended correlation matrices
 lin.cor.mat = do.call("rbind", lin.cor)
+
+if(other.metrics == T){
+  mean.df = as.data.frame(do.call("rbind", mean.list)) %>%
+    mutate(iteration = 1:n.iter) %>%
+    pivot_longer(cols = 1:15) %>%
+    mutate(name = rep(unique(post$grid),n.iter)) %>%
+    rename(mean = value, grid = name)
+
+  var.df = as.data.frame(do.call("rbind", var.list)) %>%
+    mutate(iteration = 1:n.iter) %>%
+    pivot_longer(cols = 1:15) %>%
+    mutate(name = rep(unique(post$grid),n.iter)) %>%
+    rename(var = value, grid = name)
+
+  trend.df = as.data.frame(do.call("rbind", trend.list)) %>%
+    mutate(iteration = 1:n.iter) %>%
+    pivot_longer(cols = 1:15) %>%
+    mutate(name = rep(unique(post$grid),n.iter)) %>%
+    rename(trend = value, grid = name)
+}
 
 # combine all matrices into a "long" data.frame with grid labels
 gridA = rep(unique(post$grid), n.grid)
@@ -142,40 +194,18 @@ gridB.list = lapply(1:n.grid, function(x)
   rep(unique(post$grid)[x], n.grid))
 gridB = c(do.call("cbind", gridB.list))
 iter.list = lapply(1:n.iter, function(x) rep(x, n.grid*n.grid))
-if(all.methods == F){
 grid.cor = cbind.data.frame(
   gridA = rep(gridA, n.iter),
   gridB = rep(gridB, n.iter),
   lin.cor = as.vector(t(lin.cor.mat))
 ) %>%
   mutate(upper.tri = rep(as.vector(t(
-    upper.tri(lin.cor.mat[1:n.grid, 1:n.grid])
+    upper.tri(lin.cor.mat[1:n.grid, 1:n.grid], diag = TRUE)
   )), n.iter)) %>%
   mutate(iteration = c(do.call("cbind", iter.list))) %>%
   filter(upper.tri == T) %>% # this excludes duplicate and diagonal correlations from the matrix
   dplyr::select(-upper.tri) %>%
-  arrange(iteration, gridA, gridB)
-}
-
-if (all.methods == T) {
-  grid.cor = cbind.data.frame(
-    gridA = rep(gridA, n.iter),
-    gridB = rep(gridB, n.iter),
-    lin.cor = as.vector(t(lin.cor.mat)),
-    lin.l.cor = as.vector(t(lin.l.cor.mat)),
-    ar1.cor = as.vector(t(ar1.cor.mat)),
-    ar1.l.cor = as.vector(t(ar1.l.cor.mat)),
-    dif.cor = as.vector(t(dif.cor.mat)),
-    dif.l.cor = as.vector(t(dif.l.cor.mat))
-  ) %>%
-    mutate(upper.tri = rep(as.vector(t(
-      upper.tri(lin.cor.mat[1:n.grid, 1:n.grid])
-    )), n.iter)) %>%
-    mutate(iteration = c(do.call("cbind", iter.list))) %>%
-    filter(upper.tri == T) %>% # this excludes duplicate and diagonal correlations from the matrix
-    dplyr::select(-upper.tri) %>%
-    arrange(iteration, gridA, gridB)
-}
+  arrange(iteration, gridA, gridB) 
 
 # calculate inter-grid distances for 2 X 2 degree lat/long grid cells
 gridlat = as.numeric(substr(as.character(unique(post$grid)), 1, 2)) - 0.5
@@ -200,14 +230,13 @@ dgrid = data.frame(
   gridA = gridB,
   gridB = gridA,
   dist = as.vector(dmat.grid),
-  upper.tri = as.vector(upper.tri(dmat.grid))
+  upper.tri = as.vector(upper.tri(dmat.grid, diag = TRUE))
 ) %>%
   filter(upper.tri == T) %>%
   dplyr::select(-upper.tri) %>%
   arrange(gridA, gridB)
   
 # adding in the distance between grid cells again
-if(all.methods == F){
 grid.cordist = grid.cor %>%
   left_join(dgrid, by = c('gridA', 'gridB')) %>%
   dplyr::select(gridA,
@@ -215,78 +244,85 @@ grid.cordist = grid.cor %>%
                 lin.cor,
                 dist,
                 iteration) %>%
-  arrange(iteration, gridA, gridB)
+  arrange(iteration, gridA, gridB) %>%
+  mutate(lin.cor = case_when(dist != 0 ~ lin.cor,
+                             TRUE ~ as.numeric(NA)))
+
+if (other.metrics == T) {
+  grid.cordist = grid.cordist %>%
+    left_join(mean.df, by = c("gridA" = "grid", "iteration")) %>%
+    rename(meanA = mean) %>%
+    left_join(mean.df, by = c("gridB" = "grid", "iteration")) %>%
+    rename(meanB = mean) %>%
+    left_join(var.df, by = c("gridA" = "grid", "iteration")) %>%
+    rename(varA = var) %>%
+    left_join(var.df, by = c("gridB" = "grid", "iteration")) %>%
+    rename(varB = var) %>%
+    left_join(trend.df, by = c("gridA" = "grid", "iteration")) %>%
+    rename(trendA = trend) %>%
+    left_join(trend.df, by = c("gridB" = "grid", "iteration")) %>%
+    rename(trendB = trend)
 }
 
-if (all.methods == T) {
-  grid.cordist = grid.cor %>%
-    left_join(dgrid, by = c('gridA', 'gridB')) %>%
-    dplyr::select(
-      gridA,
-      gridB,
-      lin.cor,
-      lin.l.cor,
-      ar1.cor,
-      ar1.l.cor,
-      dif.cor,
-      dif.l.cor,
-      dist,
-      iteration
+# create sets of adjacent cells within 400 km ("grid" being the focal cell)
+mapsync_step1 =
+  rbind(
+    data.frame(grid.cordist, grid = grid.cordist$gridA),
+    data.frame(
+      filter(grid.cordist, dist != 0),
+      grid = filter(grid.cordist, dist != 0)$gridB
+    )
+  ) %>%
+  filter(dist < 400)
+
+if (other.metrics == T) {
+  mapsync_step1 = mapsync_step1 %>%
+    mutate(
+      mean = case_when(grid == gridA ~ meanB,
+                       TRUE ~ meanA),
+      var = case_when(grid == gridA ~ varB,
+                      TRUE ~ varA),
+      trend = case_when(grid == gridA ~ trendB,
+                        TRUE ~ trendA)
     ) %>%
-    arrange(iteration, gridA, gridB)
+    dplyr::select(-meanA, -meanB, -varA, -varB, -trendA, -trendB)
 }
 
-# create moving average of all adjacent cells within 400 km
-if(all.methods == F){
-mapsync =
-  rbind(
-    data.frame(grid.cordist, grid = grid.cordist$gridA),
-    data.frame(grid.cordist, grid = grid.cordist$gridB)
-  ) %>%
-  filter(dist < 400) %>%
-  group_by(iteration, grid) %>%
-  summarise(
-    meancor.lin = mean(lin.cor),
-    n.grids.per.mean = length(grid)
-  ) %>%
-  ungroup() %>%
-  mutate(grid = as.character(grid)) %>%
-  filter(n.grids.per.mean > 1) %>%
-  dplyr::select(-n.grids.per.mean) %>%
-  arrange(iteration, grid)
-}
-
-if(all.methods == T){
-mapsync =
-  rbind(
-    data.frame(grid.cordist, grid = grid.cordist$gridA),
-    data.frame(grid.cordist, grid = grid.cordist$gridB)
-  ) %>%
-  filter(dist < 400) %>%
-  group_by(iteration, grid) %>%
-  summarise(
-    meancor.lin = mean(lin.cor),
-    meancor.lin.l = mean(lin.l.cor),
-    meancor.ar1 = mean(ar1.cor),
-    meancor.ar1.l = mean(ar1.l.cor),
-    meancor.dif = mean(dif.cor),
-    meancor.dif.l = mean(dif.l.cor),
-    n.grids.per.mean = length(grid)
-  ) %>%
-  ungroup() %>%
-  mutate(grid = as.character(grid)) %>%
-  filter(n.grids.per.mean > 1) %>%
-  dplyr::select(-n.grids.per.mean) %>%
-  arrange(iteration, grid)
+# create 400 km moving window average of synchrony, abundance, variance, trend
+if (other.metrics == T) {
+  mapsync = mapsync_step1 %>%
+    group_by(iteration, grid) %>%
+    summarise(
+      meancor.lin = mean(lin.cor, na.rm = T),
+      mean.mean = mean(mean),
+      mean.var = mean(var),
+      mean.trend = mean(trend),
+      n.grids.per.mean = length(grid) # for mean correlations (others include center cell, so = + 1)
+    ) %>%
+    ungroup() %>%
+    mutate(grid = as.character(grid)) %>%
+    filter(n.grids.per.mean > 1) %>%
+    dplyr::select(-n.grids.per.mean) %>%
+    arrange(iteration, grid)
+} else{
+  mapsync = mapsync_step1 %>%
+    group_by(iteration, grid) %>%
+    summarise(meancor.lin = mean(lin.cor, na.rm = T),
+              n.grids.per.mean = length(grid)) %>% # for mean correlations (others include center cell, so = + 1)) %>%
+    ungroup() %>%
+    mutate(grid = as.character(grid)) %>%
+    filter(n.grids.per.mean > 1) %>%
+    dplyr::select(-n.grids.per.mean) %>%
+    arrange(iteration, grid)
 }
 
 # write csv for iterations method (uncertainty == T)
 if(uncertainty==T){
-write.csv(mapsync, paste0(save.to, spcode,".",substr(startyr,3,4),".", substr(endyr,3,4),".mapsync.iterations.csv"))
+write.csv(mapsync, paste0(save.to, spcode,".",substr(startyr,3,4),".", substr(endyr,3,4),".mapsync.iterations.csv"), row.names=FALSE)
 }
 
 # write csv for "median posterior" method (uncertainty == F)
 if(uncertainty==F){
-write.csv(mapsync, paste0(save.to, spcode,".",substr(startyr,3,4),".", substr(endyr,3,4),".mapsync.medians.csv"))
+write.csv(mapsync, paste0(save.to, spcode,".",substr(startyr,3,4),".", substr(endyr,3,4),".mapsync.medians.csv"), row.names=FALSE)
 }
 }

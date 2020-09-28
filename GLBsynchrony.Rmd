@@ -9,7 +9,8 @@ This code processes route-level Breeding Bird Survey count data summarized into 
 
 # Section 1. Load libraries, functions, data
 
-## 1.1 Load packages and functions
+## 1.1 Load packages, functions, & species data
+We started with 30 grassland-specialist species. The 11 species excluded here did not have enough data for synchrony analysis after processing (see paper). Edit the csv data file and this code if you want to use a different list of species. And edit the code below if you want to create customize time periods (currently it is set for 1968-1993 and 1994-2019).
 ```{r, warning = F}
 library(tidyverse)
 library(bbsBayes)
@@ -23,40 +24,7 @@ source("scripts/functions/run.gamyet.func.R") # function to run the hierarchical
 source("scripts/functions/mapsync.func.R") # function to perform synchrony calculations (either iteratively on bootstrapped datasets from the posterior or on posterior medians) 
 `%notin%` <- Negate(`%in%`) # function for "does not contain"
 is.odd <- function(x) x %% 2 != 0 # functions for identifying odd numbers
-```
 
-## 1.2. Load spatial data for mapping
-```{r}
-# Canada
-can = rgdal::readOGR("data/province.shp") 
-canada.fort = ggplot2::fortify(can) %>%
-  filter(lat <60.0001)
-rm(can)
-
-# load Bird Conservation Region shapefile
-bcr = rgdal::readOGR("data/bcr_terrestrial_shape/BCR_Terrestrial_master_International_clip.shp")
-bcr.fort = ggplot2::fortify(bcr) %>%
-  filter(lat <60.0001, long > -150)
-rm(bcr)
-
-# make a base map of North America
-(na <- ggplot() +
-  borders("world", xlim = c(-150, -60), ylim = c(35, 40), colour = "gray85", fill = "gray80")  +
-  borders("state", colour = "gray85", fill = "gray80", size = 0.5) +
-  geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray85", fill = "gray80", size = 0.5) +
-  ggthemes::theme_map() + 
-  coord_map('albers', lat0=30, lat1=60) )
-
-(na.blank <- ggplot() +
-  borders("world", xlim = c(-150, -60), ylim = c(25, 40), colour = "gray80", fill = "gray80")  +
-#  borders("state", colour = "gray85", fill = "gray80") +
-  geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray80", fill = "gray80") +
-  ggthemes::theme_map() + 
-  coord_map('albers', lat0=30, lat1=60) )
-```
-## 1.3. Load list of species, abreviations, and time periods
-We started with 30 grassland-specialist species. The 11 species excluded here did not have enough data for synchrony analysis after processing (see paper). Edit the csv data file and this code if you want to use a different list of species. And edit the code below if you want to create customize time periods (currently it is set for 1968-1993 and 1994-2019).
-```{r}
 species = read.csv("data/species_names.csv", stringsAsFactors = F) %>%
   bind_rows(read.csv("data/species_names.csv", stringsAsFactors = F)) %>%
   mutate(startyr = c(rep(1968,30),rep(1994,30)),
@@ -66,12 +34,13 @@ species = read.csv("data/species_names.csv", stringsAsFactors = F) %>%
 # and wtha, grpc, seow, feha (no final grid cells in per 1)
 # and hesp, mclo (0 & 4 final qualifying cells for difference calculations)
 ```
-## 1.4. Access BBS data via bbsBayes package
+# Section 2. Setup and run JAGS model to generate BBS indices
+## 2.1. Access BBS data via bbsBayes package
 You only need to run this code once. You'll need to accept the terms of use.
 ```{r}
 #bbs_data <- fetch_bbs_data() # get BBS data (only need to run this once ever)
 ```
-## 1.5. Format BBS data & export csv files that will be used in model to generate indices
+## 2.2. Format BBS data & export csv files that will be used in model
 This code generates a csv file for each species and time period (saved to the data/jags folder) that will be used to run hierarchical models to generate BBS indices for 2x2 degree grid cells. The code, functions, and model (GAMYE-t) are from the bbsBayes package (Edwards & Smith 2020). It was necessary to generate a large number of CSV's (rather than running it all within bbsBayes) so that the hierarchical models could be run in the JagsUI package on a supercomputer cluster (which could not run bbsBayes). This code customizes the bbsBayes code to stratify by 2x2 degree instead of 1x1 grid cells. This step takes several minutes.
 ```{r}
 #####################################
@@ -83,23 +52,22 @@ for (i in 1:nrow(species)) {
     species = species$species[i],
     startyr = species$startyr[i],
     endyr = species$endyr[i],
-    save.loc = "data/jags/" 
+    save.loc = "data/jags/" # where to write .csv files
   )
 }
 #####################################
 #### OR create JAGS data for one species at a time (as csv files)
 #####################################
-gridcollapse(
-  spcode = "bais",
-  species = "Baird's Sparrow",
-  startyr = 1994,
-  endyr = 2019,
-  save.loc = "data/jags/" # where you want to save the csv file to
-)
-# csv file is written to data/jags folder
+#gridcollapse(
+#  spcode = "bais",
+#  species = "Baird's Sparrow",
+#  startyr = 1994,
+#  endyr = 2019,
+#  save.loc = "data/jags/" # where to write .csv file
+#)
 ```
-# Section 2. Run JAGS model to generate BBS indices
-## 2.1. Run Jags models to generate BBS indices
+
+## 2.3. Run Jags models to generate BBS indices
 This runs the Bayesian hierarchical model to generate BBS indices for each species/grid/year. The model is the General Additive Model with Year (heavy-tailed option) from the bbsBayes package (Edwards & Smith 2020). These cam take ~1-10+ hours for each species/period (running on 3 cores in parallel) depending on how widespread the species is (e.g., BAIS took ~45 min, while SAVS took 10+ hours). Thus, we ran most on the Rutgers Amarel supercomputer cluster. You can customize the MCMC parameters using the chains, iter, burn, and thin arguments (currently they are set at the bbsBayes defaults).
 ```{r}
 #####################################
@@ -135,7 +103,7 @@ run.gamyet(
 ```
 # Section 3. Computing mean spatial synchrony by species and grid cell
 ## 3.1 Compute mean spatial synchrony (r)
-Setting all.methods to "F" computes synchrony metrics (mean r) using only linear detrending; setting this to "T" also computes the metrics using first-order autoregressive and differencing methods, and with and without log-transformation. The former is quicker. Setting uncertainty to "T" computes the metrics numerous times (set using "n.iter") on data sets created by resampling from the posterior distribution; setting it to "F" only computes them once using the median values of the posteriors. The latter is quicker. For reference, this function took ~15 minutes for a widespread species (Savannah Sparrow) on a laptop with all.methods = F and uncertainty = T. The resulting csv files of mean correlations saves to the location indicated by "save.to".
+Setting other.metrics to "F" computes synchrony metrics (mean r) using linear detrending; setting this to "T" also computes mean abundance, variance, and trends for cells. The former is quicker. Setting uncertainty to "T" computes the metrics numerous times (set using "n.iter") on data sets created by resampling from the posterior distribution; setting it to "F" only computes them once using the median values of the posteriors. The latter is quicker. For reference, this function took ~15 minutes for a widespread species (Savannah Sparrow) on a laptop with all.methods = F and uncertainty = T. The resulting csv files of mean correlations saves to the location indicated by "save.to".
 ```{r}
 #####################################
 #### code to compute mean spatial synchrony for a single species and time period
@@ -154,19 +122,23 @@ mapsync(
   save.to = "data/mapsync_iterations/"
 )
 #####################################
-#### OR use this code to computes mean spatial synchrony for all species and time periods
+#### OR use this code to compute mean synchrony for all species and time periods
 #####################################
-#for(i in 1:nrow(species)) {
-#  mapsync(
-#    spcode = species$spcode[i],
-#    startyr = species$startyr[i],
-#    uncertainty = F,
-#    all.methods = F,
-#    posterior.data.loc = "data/index_posteriors/",
-#    rawcount.data.loc = "data/raw_counts/",
-#    save.to = "data/mapsync_iterations/"
-#  )
-#}
+for(i in 1:nrow(species)) {
+  mapsync(
+    spcode = species$spcode[i],
+    startyr = species$startyr[i],
+    endyr = species$endyr[i],
+    n.iter = 3000,
+    n.post = 3000,
+    uncertainty = T,
+    maxzeros = 5,
+    other.metrics = T,
+    posterior.data.loc = "data/index_posteriors/",
+    jags.data.loc = "data/jags/",
+    save.to = "data/mapsync_iterations/"
+  )
+}
 ```
 # Section 4. Summarize spatial synchrony data for mapping and analysis
 ## 4.1. Read in files with mean synchrony data (mean synchrony calculated from many resampled data sets from the BBS index posterior distributions)
@@ -487,6 +459,35 @@ syncdif.spp.sum %>%
  #ggsave("figures/dotplot_linear_p95.png")
 ```
 
+## Load spatial data for mapping
+```{r}
+# Canada
+can = rgdal::readOGR("data/province.shp") 
+canada.fort = ggplot2::fortify(can) %>%
+  filter(lat <60.0001)
+rm(can)
+
+# load Bird Conservation Region shapefile
+bcr = rgdal::readOGR("data/bcr_terrestrial_shape/BCR_Terrestrial_master_International_clip.shp")
+bcr.fort = ggplot2::fortify(bcr) %>%
+  filter(lat <60.0001, long > -150)
+rm(bcr)
+
+# make a base map of North America
+(na <- ggplot() +
+  borders("world", xlim = c(-150, -60), ylim = c(35, 40), colour = "gray85", fill = "gray80")  +
+  borders("state", colour = "gray85", fill = "gray80", size = 0.5) +
+  geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray85", fill = "gray80", size = 0.5) +
+  ggthemes::theme_map() + 
+  coord_map('albers', lat0=30, lat1=60) )
+
+(na.blank <- ggplot() +
+  borders("world", xlim = c(-150, -60), ylim = c(25, 40), colour = "gray80", fill = "gray80")  +
+#  borders("state", colour = "gray85", fill = "gray80") +
+  geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray80", fill = "gray80") +
+  ggthemes::theme_map() + 
+  coord_map('albers', lat0=30, lat1=60) )
+```
 # Map change in synchrony for all species individually (tiles)
 ```{r}
 na +

@@ -2,9 +2,9 @@
 # Note: parallel processing speeded it up, but stopped working correctly somewhere along the line (weird values)
 
 # for testing
-#spcode = "bais"
-#startyr = 1994
-#endyr = 2019
+#spcode = "noha"
+#startyr = 1968
+#endyr = 1993
 #n.iter = 3000
 #n.post = 3000
 #uncertainty = T
@@ -135,7 +135,7 @@ if(other.metrics == T) {
     lots.c = as.numeric(do.call("rbind", x[1:(ncol(x) - 2)]))
     lots.mat = matrix(lots.c, ncol = (ncol(x) - 2), byrow = T)
     lots.mean = colMeans(lots.mat, 1L)
-    return(matrix(lots.mean, 1, 15))
+    return(matrix(lots.mean, 1, n.grid))
   }
   
   mean.list <- lapply(lots.df.split, mean.func)
@@ -143,7 +143,7 @@ if(other.metrics == T) {
   # a function to calculate variance of each detrended time series (for when "other.metrics" = T)
   var.func = function(x) {
     lots.var = apply(x, 2L, var)
-    return(matrix(lots.var, 1, 15))
+    return(matrix(lots.var, 1, n.grid))
   }
   
   var.list <- lapply(lin.list, var.func)
@@ -154,7 +154,7 @@ if(other.metrics == T) {
     lots.mat = matrix(lots.c, ncol = (ncol(x) - 2), byrow = T)
     lots.trend = apply(lots.mat, 2L, function(y)
       coef(lm(y ~ c(1:26)))[2])
-    return(matrix(lots.trend, 1, 15))
+    return(matrix(lots.trend, 1, n.grid))
   }
   
   trend.list <- lapply(lots.df.split, trend.func)
@@ -171,19 +171,19 @@ lin.cor.mat = do.call("rbind", lin.cor)
 if(other.metrics == T){
   mean.df = as.data.frame(do.call("rbind", mean.list)) %>%
     mutate(iteration = 1:n.iter) %>%
-    pivot_longer(cols = 1:15) %>%
+    pivot_longer(cols = 1:n.grid) %>%
     mutate(name = rep(unique(post$grid),n.iter)) %>%
     rename(mean = value, grid = name)
 
   var.df = as.data.frame(do.call("rbind", var.list)) %>%
     mutate(iteration = 1:n.iter) %>%
-    pivot_longer(cols = 1:15) %>%
+    pivot_longer(cols = 1:n.grid) %>%
     mutate(name = rep(unique(post$grid),n.iter)) %>%
     rename(var = value, grid = name)
 
   trend.df = as.data.frame(do.call("rbind", trend.list)) %>%
     mutate(iteration = 1:n.iter) %>%
-    pivot_longer(cols = 1:15) %>%
+    pivot_longer(cols = 1:n.grid) %>%
     mutate(name = rep(unique(post$grid),n.iter)) %>%
     rename(trend = value, grid = name)
 }

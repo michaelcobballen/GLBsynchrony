@@ -1,19 +1,6 @@
 # Note: this code may run quicker when not packaged into a function for some reason
 # Note: parallel processing speeded it up, but stopped working correctly somewhere along the line (weird values)
 
-# for testing
-#spcode = "noha"
-#startyr = 1968
-#endyr = 1993
-#n.iter = 3000
-#n.post = 3000
-#uncertainty = T
-#maxzeros = 5
-#other.metrics = T
-#posterior.data.loc = "data/index_posteriors/"
-#jags.data.loc = "data/jags/"
-#save.to = "data/mapsync_iterations/" 
-
 mapsync = function(spcode,
                    startyr,
                    endyr,
@@ -29,6 +16,7 @@ mapsync = function(spcode,
                    jags.data.loc = "data/jags/",
                    save.to = "data/mapsync_iterations/") {
   
+memory.limit(size = 9999999)
 
 if(uncertainty == F){n.iter = 1}
 

@@ -22,6 +22,7 @@ library(forcats)
 source("scripts/functions/gridcollapse.func.R") # function to prepare raw BBS data within 2 x 2 degree grid cells formatted for the Bayesian (JAGS) model (modified bbsBayes code)
 source("scripts/functions/run.gamyet.func.R") # function to run the hierarchical JAGS model to generate BBS indices for 2 x 2 degree grid cells (modified from bbsBayes code)
 source("scripts/functions/mapsync.func.R") # function to perform synchrony calculations (either iteratively on bootstrapped datasets from the posterior or on posterior medians) 
+#load("data/sync.summaries.Rdata") # load synchrony summaries to skip section 4
 `%notin%` <- Negate(`%in%`) # function for "does not contain"
 is.odd <- function(x) x %% 2 != 0 # functions for identifying odd numbers
 
@@ -109,7 +110,7 @@ Setting other.metrics to "F" computes synchrony metrics (mean r) using linear de
 #### code to compute mean spatial synchrony for a single species and time period
 #####################################
 mapsync(
-  spcode = "noha",
+  spcode = "hola",
   startyr = 1968,
   endyr = 1993,
   n.iter = 3000, # number of data sets to create by resampling from the posterior distributions
@@ -122,9 +123,10 @@ mapsync(
   save.to = "data/mapsync_iterations/"
 )
 #####################################
-#### OR use this code to compute mean synchrony for all species and time periods
+#### OR compute mean synchrony for all species and time periods
+#### note: can take a few minutes to a few hours per species and time period
 #####################################
-for(i in 32:nrow(species)) {
+for(i in 1:nrow(species)){ 
   mapsync(
     spcode = species$spcode[i],
     startyr = species$startyr[i],
@@ -151,7 +153,7 @@ Synchrony iterations were generated based on 3000 data sets from random draws of
 ```{r}
 # make a list of files containing the mean synchrony data sets
 mapsync.files = sprintf(
-  "scripts//amarel//%s.mapsync.iterations.csv",
+  paste0(mapsync.loc,"%s.mapsync.iterations.csv"),
   paste0(
     species$spcode,
     ".",
@@ -169,6 +171,7 @@ names(mapsync.iterations) <-   paste0(species$spcode,
                                       substr(species$startyr, 3, 4),
                                       ".",
                                       substr(species$endyr, 3, 4))
+rm(mapsync.files, mapsync.loc)
 ```
 ## 4.2. Subset only grid cells with adequate data from both time periods
 ```{r}
@@ -192,6 +195,8 @@ for (i in 1:nrow(species)) {
   mapsync.com[[i]] = filter(mapsync.iterations[[i]], grid %in% grid.common2[[i]])
 }
 names(mapsync.com) <- species$spcode
+
+rm(grid.common, grid.common2, mapsync.iterations)
 ```
 ## 4.3. Create mean synchrony data sets for period 1, period 2, and the difference 
 ```{r}
@@ -199,13 +204,13 @@ names(mapsync.com) <- species$spcode
 mapsync.com1 = mapsync.com[1:numsp]
 mapsync.com2 = mapsync.com[(numsp+1):nrow(species)]
 mapsync.dif1 = Map(function(listper2, listper1)
-  listper2[, 4:9] - listper1[, 4:9],
+  listper2[, 3:6] - listper1[, 3:6],
   mapsync.com2,
   mapsync.com1)
 
 # add in iteration and grid variables back to synchrony change
 mapsync.dif = Map(function(mainlist, listnames)
-  cbind(listnames[, 2:3], mainlist[, 1:6]),
+  cbind(listnames[, 1:2], mainlist[, 1:4]),
   mapsync.dif1,
   mapsync.com1)
 
@@ -219,34 +224,49 @@ for (i in 1:numsp) {
 ```{r}
 # create giant data frame with all iterations of dif, per1, and per2 for all spp
 syncdif.all = cbind(
-  do.call("rbind", mapsync.dif.names)[, c(1:3, 5, 7)],
+  do.call("rbind", mapsync.dif.names)[, c(1:7)],
   # difference
-  do.call("rbind", mapsync.com1)[, c(5, 7)],
+  do.call("rbind", mapsync.com1)[, c(3:6)],
   # period 1
-  do.call("rbind", mapsync.com2)[, c(5, 7)] # period 2
+  do.call("rbind", mapsync.com2)[, c(3:6)] # period 2
 )
 colnames(syncdif.all) = c(
   "spcode",
   "iteration",
   "grid",
-  "lin.dif",
-  "ar1.l.dif",
-  "lin.one",
-  "ar1.l.one",
-  "lin.two",
-  "ar1.l.two"
-)
+  "sync.dif",
+  "mean.dif",
+  "var.dif",
+  "trend.dif",
+  "sync.one",
+  "mean.one",
+  "var.one",
+  "trend.one",
+  "sync.two",
+  "mean.two",
+  "var.two",
+  "trend.two")
 
+rm(mapsync.com, mapsync.com1, mapsync.com2, mapsync.dif1, mapsync.dif, mapsync.dif.names)
+```
+
+```{r}
 # average by grid cell across species for each iteration
 syncdif = syncdif.all %>%
   group_by(iteration, grid) %>%
   summarise(
-    lin.dif = mean(lin.dif),
-    ar1.l.dif = mean(ar1.l.dif),
-    lin.one = mean(lin.one),
-    ar1.l.one = mean(ar1.l.one),
-    lin.two = mean(lin.two),
-    ar1.l.two = mean(ar1.l.two),
+    sync.dif = mean(sync.dif),
+    mean.dif = mean(mean.dif),
+    var.dif = mean(var.dif),
+    trend.dif = mean(trend.dif),
+    sync.one = mean(sync.one),
+    mean.one = mean(mean.one),
+    var.one = mean(var.one),
+    trend.one = mean(trend.one),
+    sync.two = mean(sync.two),
+    mean.two = mean(mean.two),
+    var.two = mean(var.two),
+    trend.two = mean(trend.two),
     spp.per.grid = length(spcode)
   ) %>%
   ungroup() %>%
@@ -254,17 +274,15 @@ syncdif = syncdif.all %>%
   dplyr::select(-spp.per.grid)
 ```
 
-
-
 ```{r}
 # summarize synchrony change iterations by quantiles (all species)
 syncdif.split = split(syncdif, f = syncdif$grid)
 
 syncdif.sum.list = lapply(syncdif.split, function(x)
-  apply(x[, 3:8], 2L, FUN = quantile, probs = c(0.05, 0.5, 0.95)))
+  apply(x[, 3:14], 2L, FUN = quantile, probs = c(0.05, 0.5, 0.95)))
 
 syncdif.sum = data.frame(do.call("rbind", syncdif.sum.list)) %>%
-  mutate(quant = rep(c("p5", "med", "p95"), 172),
+  mutate(quant = rep(c("p5", "med", "p95"), length(syncdif.sum.list)),
          grid = c(mapply(
            unique(syncdif$grid),
            FUN = function(x)
@@ -272,75 +290,110 @@ syncdif.sum = data.frame(do.call("rbind", syncdif.sum.list)) %>%
          ))) %>%
   tidyr::pivot_wider(
     names_from = quant,
-    values_from = c(lin.dif, ar1.l.dif, lin.one, ar1.l.one, lin.two, ar1.l.two)
+    values_from = c(sync.dif:trend.two)
   ) %>%
   mutate(
     lat = as.numeric(substr(grid, 1, 2)) - 0.5,
     lon = as.numeric(substr(grid, 3, 10)) + 0.5
   )
 
+rm(syncdif.split, syncdif.sum.list)
+```
+
+```{r}
 # join averaged species syncdif data to individual species data
 syncdif.spp.prep = syncdif.all %>%
-  select(spcode, lin.dif, ar1.l.dif, lin.one, ar1.l.one, lin.two, ar1.l.two, iteration) %>%
-  bind_rows(select(syncdif, lin.dif, ar1.l.dif, lin.one, ar1.l.one, lin.two, ar1.l.two, iteration)) %>%
+  select(
+    spcode,
+    sync.dif,
+    mean.dif,
+    var.dif,
+    trend.dif,
+    sync.one,
+    mean.one,
+    var.one,
+    trend.one,
+    sync.two,
+    mean.two,
+    var.two,
+    trend.two,
+    iteration
+  ) %>%
+  bind_rows(
+    select(
+      syncdif,
+      sync.dif,
+      mean.dif,
+      var.dif,
+      trend.dif,
+      sync.one,
+      mean.one,
+      var.one,
+      trend.one,
+      sync.two,
+      mean.two,
+      var.two,
+      trend.two,
+      iteration
+    )
+  ) %>%
   mutate(spcode = as.factor(case_when(is.na(spcode) ~ "All species",
-                             TRUE ~ spcode)))
+                                      TRUE ~ spcode)))
 
-# synchrony change of each grid cell (median of 3000 iterations) for each species
-syncdif.spp.map = cbind(aggregate(
-  syncdif.all[,c("lin.dif", "ar1.l.dif", "lin.one", "ar1.l.one", "lin.two", "ar1.l.two")],
-  by = list(syncdif.all$spcode, syncdif.all$grid),
-  median
-),
-aggregate(
-  syncdif.all[,c("lin.dif", "ar1.l.dif", "lin.one", "ar1.l.one", "lin.two", "ar1.l.two")],
-  by = list(syncdif.all$spcode, syncdif.all$grid),
-  FUN = function(x) quantile(x, 0.05)
-),
-aggregate(
-  syncdif.all[,c("lin.dif", "ar1.l.dif", "lin.one", "ar1.l.one", "lin.two", "ar1.l.two")],
-  by = list(syncdif.all$spcode, syncdif.all$grid),
-  FUN = function(x) quantile(x, 0.95)
-)
-)[,c(1:8,11:16, 19:24)]
-colnames(syncdif.spp.map) = c("spcode", "grid", "lin.dif_med", "ar1.l.dif_med", "lin.one_med", "ar1.l.one_med", "lin.two_med", "ar1.l.two_med", "lin.dif_p5", "ar1.l.dif_p5","lin.one_p5", "ar1.l.one_p5", "lin.two_p5", "ar1.l.two_p5",  "lin.dif_p95", "ar1.l.dif_p95", "lin.one_p95", "ar1.l.one_p95", "lin.two_p95", "ar1.l.two_p95")
-syncdif.spp.map$lat = as.numeric(substr(syncdif.spp.map$grid,1,2))-0.5
-syncdif.spp.map$lon = as.numeric(substr(syncdif.spp.map$grid,3,10))+0.5
+syncdif.spp.cor = syncdif.spp.prep %>% 
+  group_by(spcode, iteration) %>%
+  summarise(mean.dif.cor = cor(sync.dif, mean.dif),
+            var.dif.cor = cor(sync.dif, var.dif),
+            trend.dif.cor = cor(sync.dif, trend.dif),
+            mean.one.cor = cor(sync.one, mean.one),
+            var.one.cor = cor(sync.one, var.one),
+            trend.one.cor = cor(sync.one, trend.one),
+            mean.two.cor = cor(sync.two, mean.two),
+            var.two.cor = cor(sync.two, var.two),
+            trend.two.cor = cor(sync.two, trend.two)) %>%
+  ungroup()
 
+var.list = c("sync.dif","mean.dif", "var.dif", "trend.dif", "sync.one", "mean.one", "var.one", "trend.one", "sync.two", "mean.two", "var.two", "trend.two")
+
+cor.var.list = c("mean.dif.cor", "var.dif.cor", "trend.dif.cor", "mean.one.cor", "var.one.cor", "trend.one.cor", "mean.two.cor", "var.two.cor", "trend.two.cor")
 
 # average synchrony change of grid cells within species and iterations
+# also correlations between synchrony and mean/variance/trends too
 syncdif.spp = cbind(aggregate(
-  syncdif.spp.prep[,c("lin.dif","ar1.l.dif", "lin.one", "ar1.l.one", "lin.two", "ar1.l.two")],
+  syncdif.spp.prep[, var.list],
   by = list(syncdif.spp.prep$iteration, syncdif.spp.prep$spcode),
   mean
 ),
 aggregate(
-  syncdif.spp.prep[,c("lin.dif")],
+  syncdif.spp.prep[,c("sync.dif")],
   by = list(syncdif.spp.prep$iteration, syncdif.spp.prep$spcode),
   FUN = function(x) length(x)
 )
-)
+)[,c(1:14,17)] %>%
+  rename(iteration = Group.1, spcode = Group.2, n = x) %>%
+  left_join(syncdif.spp.cor, by = c("spcode", "iteration"))
 
 # get the median and quantiles of the mean synchrony change iterations 
 # for plotting, individual species and all species averaged
 syncdif.spp.sum = cbind(aggregate(
-  syncdif.spp[,c("lin.dif","ar1.l.dif","lin.one", "ar1.l.one", "lin.two", "ar1.l.two")],
-  by = list(syncdif.spp$Group.2),
+  syncdif.spp[, c(var.list, cor.var.list)],
+  by = list(syncdif.spp$spcode),
   FUN = function(x) quantile(x, 0.5)),
   aggregate(
-  syncdif.spp[,c("lin.dif","ar1.l.dif","lin.one", "ar1.l.one", "lin.two", "ar1.l.two")],
-  by = list(syncdif.spp$Group.2),
+  syncdif.spp[, c(var.list, cor.var.list)],
+  by = list(syncdif.spp$spcode),
   FUN = function(x) quantile(x, 0.05)),
   aggregate(
-  syncdif.spp[,c("lin.dif","ar1.l.dif","lin.one", "ar1.l.one", "lin.two", "ar1.l.two")],
-  by = list(syncdif.spp$Group.2),
+  syncdif.spp[, c(var.list, cor.var.list)],
+  by = list(syncdif.spp$spcode),
   FUN = function(x) quantile(x, 0.95)),
   aggregate(
-  syncdif.spp[,c("x")],
-  by = list(syncdif.spp$Group.2),
+  syncdif.spp[,c("n")],
+  by = list(syncdif.spp$spcode),
   mean)
-)[,c(1:7,9:14,16:21,23)]
-colnames(syncdif.spp.sum) = c("spcode", "lin.dif_med", "ar1.l.dif_med","lin.one_med", "ar1.l.one_med","lin.two_med", "ar1.l.two_med", "lin.dif_p5", "ar1.l.dif_p5", "lin.one_p5", "ar1.l.one_p5", "lin.two_p5", "ar1.l.two_p5", "lin.dif_p95", "ar1.l.dif_p95", "lin.one_p95", "ar1.l.one_p95", "lin.two_p95", "ar1.l.two_p95", "n")
+)[,c(1:22,24:44,46:66, 68)]
+
+colnames(syncdif.spp.sum) = c("spcode", paste0(c(var.list, cor.var.list), "_med"), paste0(c(var.list, cor.var.list), "_p5"), paste0(c(var.list, cor.var.list), "_p95"), "n")
 
 syncdif.spp.sum = syncdif.spp.sum %>%
   mutate(
@@ -365,41 +418,49 @@ syncdif.spp.sum = syncdif.spp.sum %>%
       spcode == "sewr" ~ "Sedge Wren",
       spcode == "casp" ~ "Cassin's Sparrow",
       spcode == "lbcu" ~ "Long-billed Curlew",
-      spcode == "mclo" ~ "McCown's Longspur",
       spcode == "All species" ~ "All species"
     )
   ) %>%
   mutate(
     order = case_when(spcode == "All species" ~ -0.5,
-                      TRUE ~ lin.dif_med),
+                      TRUE ~ sync.dif_med),
     fullsp = forcats::fct_reorder(fullsp, order, .desc = T)
-  ) 
+  )
+
+rm(syncdif.spp.prep, syncdif.spp, syncdif, syncdif.spp.cor)
+```
+
+```{r}
+# synchrony change of each grid cell (median of 3000 iterations) for each species
+syncdif.spp.map = cbind(aggregate(
+  syncdif.all[, var.list],
+  by = list(syncdif.all$spcode, syncdif.all$grid),
+  median
+),
+aggregate(
+  syncdif.all[, var.list],
+  by = list(syncdif.all$spcode, syncdif.all$grid),
+  FUN = function(x) quantile(x, 0.05)
+),
+aggregate(
+  syncdif.all[, var.list],
+  by = list(syncdif.all$spcode, syncdif.all$grid),
+  FUN = function(x) quantile(x, 0.95)
+)
+)[,c(1:14,17:28,31:42)]
+colnames(syncdif.spp.map) = c("spcode", "grid", paste0(var.list, "_med"), paste0(var.list, "_p5"), paste0(var.list, "_p95"))
+syncdif.spp.map$lat = as.numeric(substr(syncdif.spp.map$grid,1,2))-0.5
+syncdif.spp.map$lon = as.numeric(substr(syncdif.spp.map$grid,3,10))+0.5
 
 syncdif.spp.map = syncdif.spp.map %>%
   left_join(syncdif.spp.sum[,c("spcode", "fullsp")], by = "spcode") 
 
-# Remove unneeded objects
-rm(grid.common)
-rm(grid.common2)
-rm(mapsync.com)
-rm(mapsync.com1)
-rm(mapsync.com2)
-rm(mapsync.dif.names)
-rm(mapsync.dif)
-rm(mapsync.dif1)
-rm(mapsync.iterations)
-rm(syncdif.all)
-rm(syncdif.spp.prep)
-rm(syncdif.spp)
-rm(syncdif.split)
-rm(syncdif)
-rm(syncdif.sum.list)
+rm(syncdif.all, var.list, cor.var.list)
 ```
-
 # Create forest plot of synchrony change by species
 ```{r} 
 dotplot_n = syncdif.spp.sum %>%  
-  dplyr::select(spcode, lin.dif_med, n, order) %>%
+  dplyr::select(spcode, sync.dif_med, n, order) %>%
   arrange(desc(order)) 
 
 #x11(10,9)
@@ -413,12 +474,12 @@ syncdif.spp.sum %>%
     size = 1.5
   ) +
   geom_errorbarh(aes(
-    xmin = lin.dif_p5,
-    xmax = lin.dif_p95,
+    xmin = sync.dif_p5,
+    xmax = sync.dif_p95,
     y = fullsp,
     height = .2
   )) +
-  geom_point(aes(x = lin.dif_med, y = fullsp, color = lin.dif_med), size = 4.5) +
+  geom_point(aes(x = sync.dif_med, y = fullsp, color = sync.dif_med), size = 4.5) +
   scale_color_distiller(name = "Mean\nchange", palette = "RdYlBu", limits = c(-0.105, 0.21)) +
 #  scale_color_viridis(name = "Mean\nchange",
 #                      option = "viridis",
@@ -487,18 +548,30 @@ rm(bcr)
   geom_polygon(data=canada.fort, aes(x = long, y = lat, group=group), colour = "gray80", fill = "gray80") +
   ggthemes::theme_map() + 
   coord_map('albers', lat0=30, lat1=60) )
+
+rm(canada.fort)
 ```
-# Map change in synchrony for all species individually (tiles)
+# Map change in synchrony for all species individually
 ```{r}
+syncdif.spp.map = syncdif.spp.map %>%
+  mutate(
+    fullsp2 = case_when(
+      as.character(fullsp) == "Chestnut-col. Longspur" ~ "C. Longspur",
+      as.character(fullsp) == "Ring-necked Pheasant" ~ "R. Pheasant",
+      TRUE ~ as.character(fullsp)
+    ),
+    fullsp2 = forcats::fct_reorder(fullsp2, as.numeric(fullsp), .desc = F)
+  )
+
 na +
   geom_tile(
-    aes(x = lon, y = lat, fill = lin.dif_med),
+    aes(x = lon, y = lat, fill = sync.dif_med),
     #alpha = .7,
-    data = filter(syncdif.spp.map, lin.dif_med < .9)
+    data = filter(syncdif.spp.map, sync.dif_med < .9)
   ) +
   scale_fill_distiller(palette = "RdYlBu", limits = c(-0.69, 0.58), breaks = c(-0.5,0,0.5), labels = c(-0.5,0,0.5)) +
   theme_classic() +
-  facet_wrap( ~ fullsp, ncol = 4) +
+  facet_wrap( ~ fullsp2, ncol = 4) +
   labs(
     fill = "Mean\nchange",
     x = "",
@@ -517,7 +590,6 @@ na +
     legend.title = element_text(size = 8),
     legend.text = element_text(size = 8),
     axis.line = element_line(color = "transparent")) +
-  xlim(c(-142, -59)) +
   geom_point(
     aes(y = lat, x = lon),
     alpha = .7,
@@ -525,7 +597,7 @@ na +
     shape = "+",
     size = 1.5,
     #    stroke = 1.5,
-    data = filter(syncdif.spp.map, lin.dif_p5 > 0, spcode != "mclo")
+    data = filter(syncdif.spp.map, sync.dif_p5 > 0)
   ) +
   geom_point(
     aes(y = lat, x = lon),
@@ -534,12 +606,16 @@ na +
     shape = "-",
     size = 1.5,
     #    stroke = 1.5,
-    data = filter(syncdif.spp.map, lin.dif_p95 < 0)
-  ) 
-#ggsave("figures/syncdif_tilemap_lin_long_legend2.tiff", width = 7, height = 9, dpi = 600)
+    data = filter(syncdif.spp.map, sync.dif_p95 < 0)
+  ) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig 3 - syncdif_tilemap_lin_long_legend2_REV2_7_10_-4_-0.5lines_trans-1.4.jpg", width = 7, height = 10, dpi = 300)
 ```
-
-# Map mean change in synchrony for all species combined (tiles)
+# Map mean change in synchrony for all species combined
 ```{r}
 #x11(13,9)
 na.blank +
@@ -591,7 +667,6 @@ na.blank +
 # Raster map of mean change in synchrony across species
 To make a shapefile for Geoda
 ```{r}
-
 # Make a grid of spatial polygons to match up with meansyncdiff data
 rr <- raster::raster(ext = raster::extent(-177, -52, 24, 69), res=c(2,2))
 raster::values(rr) <- 1:raster::ncell(rr)
@@ -601,42 +676,25 @@ attributes = tibble(lon = coordinates(p)[,1], lat = coordinates(p)[,2]) %>%
   left_join(syncdif.sum, by="grid") 
 
 p$grid = attributes$grid
-p$lin.dif_med = attributes$lin.dif_med
+p$sync.dif_med = attributes$sync.dif_med
 
-syncdif.poly = p[is.na(p$lin.dif_med)!=T,]
-
-
-syncdif.data = fortify(syncdif.poly, region = "grid") %>%
-  left_join(rename(syncdif.poly@data, id = grid), by = "id")
-
-#x11(13,9)
-na + geom_polygon(data=syncdif.data, aes(x=long, y = lat, group=group, fill = lin.dif_med)) + 
-  scale_fill_viridis(name = "Mean\nchange", option = "magma") +
-  theme_classic() +
-  theme(text = element_text(size=15)) +
-  labs(colour="Change in\nmean spatial\nsynchrony", x="", y="", title="1968-1993 vs. 1994-2019") + 
-  theme(axis.text.x = element_blank(),  axis.text.y = element_blank(),axis.ticks = element_blank()) +
-  theme(legend.title.align=0.5) +
-  theme(axis.line = element_line(color = "transparent")) +
-  xlim(c(-142,-59))
-
-#ggsave("figures/grid4_maps/Mean.ALLsp.grid4_change.viridis.poly_AR_5zeros_n20_60lat.png")
+syncdif.poly = p[is.na(p$sync.dif_med)!=T,]
 
 #writeOGR(syncdif.poly, "C:/Users/Mike/mike_files/Research/Chapter 3 - Synchrony/GLBsynchrony/data", "syncdif.poly", driver="ESRI Shapefile")
 ```
 
 
-# Map mean synchrony for all species individually (tiles) - period 1
+# Map mean synchrony for all species individually - period 1
 ```{r}
 na +
   geom_tile(
-    aes(x = lon, y = lat, fill = lin.one_med),
+    aes(x = lon, y = lat, fill = sync.one_med),
     #alpha = .7,
     data = syncdif.spp.map
   ) +
   scale_fill_distiller(palette = "RdYlBu", limits = c(-0.3, 0.75), breaks = c(-0.5,0,0.5), labels = c(-0.5,0,0.5)) +
   theme_classic() +
-  facet_wrap( ~ fullsp, ncol = 4) +
+  facet_wrap( ~ fullsp2, ncol = 4) +
   labs(
     fill = "Mean\nsynchrony",
     x = "",
@@ -655,15 +713,13 @@ na +
     legend.title = element_text(size = 8),
     legend.text = element_text(size = 8),
     axis.line = element_line(color = "transparent")) +
-  xlim(c(-142, -59)) +
   geom_point(
     aes(y = lat, x = lon),
     alpha = .7,
     color = "black",
     shape = "+",
     size = 1.5,
-    #    stroke = 1.5,
-    data = filter(syncdif.spp.map, lin.one_p5 > 0)
+    data = filter(syncdif.spp.map, sync.one_p5 > 0)
   ) +
   geom_point(
     aes(y = lat, x = lon),
@@ -672,26 +728,29 @@ na +
     shape = "-",
     size = 1.5,
     #    stroke = 1.5,
-    data = filter(syncdif.spp.map, lin.one_p95 < 0)
-  ) 
-ggsave("figures/syncmean_tilemap_lin_per1.jpg", width = 7, height = 9, dpi = 600)
+    data = filter(syncdif.spp.map, sync.one_p95 < 0)
+  ) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig S1 - syncmean_tilemap_per1_fix.jpg", width = 7, height = 10, dpi = 300)
 ```
-# Map mean synchrony for all species individually (tiles) - period 2
+# Map mean synchrony for all species individually - period 2
 ```{r}
 na +
   geom_tile(
-    aes(x = lon, y = lat, fill = lin.two_med),
-    #alpha = .7,
+    aes(x = lon, y = lat, fill = sync.two_med),
     data = syncdif.spp.map
   ) +
   scale_fill_distiller(palette = "RdYlBu", limits = c(-0.3, 0.75), breaks = c(-0.5,0,0.5), labels = c(-0.5,0,0.5)) +
   theme_classic() +
-  facet_wrap( ~ fullsp, ncol = 4) +
+  facet_wrap( ~ fullsp2, ncol = 4) +
   labs(
     fill = "Mean\nsynchrony",
     x = "",
-    y = ""#,
-    #title = "1968-1993 vs. 1994-2019"
+    y = ""
   ) +
   theme(
     text = element_text(size = 15),
@@ -705,7 +764,6 @@ na +
     legend.title = element_text(size = 8),
     legend.text = element_text(size = 8),
     axis.line = element_line(color = "transparent")) +
-  xlim(c(-142, -59)) +
   geom_point(
     aes(y = lat, x = lon),
     alpha = .7,
@@ -713,7 +771,7 @@ na +
     shape = "+",
     size = 1.5,
     #    stroke = 1.5,
-    data = filter(syncdif.spp.map, lin.two_p5 > 0)
+    data = filter(syncdif.spp.map, sync.two_p5 > 0)
   ) +
   geom_point(
     aes(y = lat, x = lon),
@@ -722,10 +780,298 @@ na +
     shape = "-",
     size = 1.5,
     #    stroke = 1.5,
-    data = filter(syncdif.spp.map, lin.two_p95 < 0)
-  ) 
-ggsave("figures/syncmean_tilemap_lin_per2.jpg", width = 7, height = 9, dpi = 600)
+    data = filter(syncdif.spp.map, sync.two_p95 < 0)
+  ) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig S2 - syncmean_tilemap_per2_fix.jpg", width = 7, height = 10, dpi = 300)
 ```
+
+# Map mean _abundance_ for all species individually - period 1
+```{r}
+na +
+  geom_tile(
+    aes(x = lon, y = lat, fill = log(mean.one_med)),
+    #alpha = .7,
+    data = syncdif.spp.map
+  ) +
+  viridis::scale_fill_viridis(option = "inferno", limits = c(log(min(syncdif.spp.map$mean.two_med)), log(max(syncdif.spp.map$mean.one_med)))) +
+  theme_classic() +
+  facet_wrap( ~ fullsp2, ncol = 4) +
+  labs(
+    fill = "Ln mean\nabundance",
+    x = "",
+    y = ""
+  ) +
+  theme(
+    text = element_text(size = 15),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 10),
+    legend.title.align = 0.5,
+    legend.position = "bottom",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.line = element_line(color = "transparent")) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig S3 - individ_spp_tilemap_mean_per1_7_10_-4_-0.5lines_trans-1.4log.jpg", width = 7, height = 10, dpi = 300)
+```
+# Map mean _abundance_ for all species individually - period 2
+```{r}
+na +
+  geom_tile(
+    aes(x = lon, y = lat, fill = log(mean.two_med)),
+    #alpha = .7,
+    data = syncdif.spp.map
+  ) +
+  viridis::scale_fill_viridis(option = "inferno", limits = c(log(min(syncdif.spp.map$mean.two_med)), log(max(syncdif.spp.map$mean.one_med)))) +
+  theme_classic() +
+  facet_wrap( ~ fullsp2, ncol = 4) +
+  labs(
+    fill = "Ln mean\nabundance",
+    x = "",
+    y = ""
+  ) +
+  theme(
+    text = element_text(size = 15),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 10),
+    legend.title.align = 0.5,
+    legend.position = "bottom",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.line = element_line(color = "transparent")) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig S4 - individ_spp_tilemap_mean_per2_7_10_-4_-0.5lines_trans-1.4log.jpg", width = 7, height = 10, dpi = 300)
+```
+# Map change in mean abundance for all species individually
+```{r}
+na +
+  geom_tile(
+    aes(x = lon, y = lat, fill = 100*mean.dif_med/mean.one_med),
+    data = syncdif.spp.map
+  ) +
+  scale_fill_distiller(palette = "RdYlBu", limits = c(-100, 100)) + 
+  theme_classic() +
+  facet_wrap( ~ fullsp2, ncol = 4) +
+  labs(
+    fill = "% change\nabund.",
+    x = "",
+    y = ""#,
+  ) +
+  theme(
+    text = element_text(size = 15),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 10),
+    legend.title.align = 0.5,
+    legend.position = "bottom",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.line = element_line(color = "transparent")) +
+  geom_point(
+    aes(y = lat, x = lon),
+    alpha = .7,
+    color = "black",
+    shape = "+",
+    size = 1.5,
+    #    stroke = 1.5,
+    data = filter(syncdif.spp.map, 100*mean.dif_p5/mean.one_p5 > 0)
+  ) +
+  geom_point(
+    aes(y = lat, x = lon),
+    alpha = .7,
+    color = "white",
+    shape = "-",
+    size = 1.5,
+    #    stroke = 1.5,
+    data = filter(syncdif.spp.map, 100*mean.dif_p95/mean.one_p95 < 0)
+  ) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig Sx - mean.dif_tilemap_REV2_7_10_-4_-0.5lines_trans-1.4pct.jpg", width = 7, height = 10, dpi = 300)
+```
+```{r}
+
+syncdif.spp.map2 <- 
+  syncdif.spp.map %>%
+  mutate(pct_abund_med = 100 * mean.dif_med / mean.one_med,
+         pct_var_med = 100 * var.dif_med / var.one_med)  
+
+pctmean = ggplot(syncdif.spp.map2, aes(x = pct_abund_med, y = sync.dif_med, color = spcode)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F, formula = y~x, size = 1) +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text = element_text(size = 12)) +
+  labs(x = "% change in abundance", y = "Change in synchrony")
+
+pctvar = ggplot(syncdif.spp.map2, aes(x = pct_var_med, y = sync.dif_med, color = spcode)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F, formula = y~x, size = 1) +
+  theme_bw() +
+  theme(legend.position = "none",
+        axis.text = element_text(size = 12)) +
+  labs(x = "% change in variance", y = "Change in synchrony")
+
+
+gridExtra::grid.arrange(pctmean, pctvar, ncol = 1)
+#gg = gridExtra::arrangeGrob(pctmean, pctvar, ncol = 1)
+#ggsave("figures/lmer_abund_var.jpg", gg)
+#rm(gg)
+```
+
+```{r}
+mean.test.pct = lme4::lmer(sync.dif_med~pct_abund_med + (1|spcode), data = syncdif.spp.map)
+summary(mean.test.pct)
+
+var.test.pct = lme4::lmer(sync.dif_med~pct_var_med + (1|spcode), data = syncdif.spp.map)
+summary(var.test.pct)
+```
+# Map mean _variance_ for all species individually - period 1
+```{r}
+na +
+  geom_tile(
+    aes(x = lon, y = lat, fill = log(var.one_med)),
+    data = syncdif.spp.map
+  ) +
+  viridis::scale_fill_viridis(option = "inferno", limits = c(log(min(syncdif.spp.map$var.two_med)), log(max(syncdif.spp.map$var.one_med)))) +
+  theme_classic() +
+  facet_wrap( ~ fullsp2, ncol = 4) +
+  labs(
+    fill = "Ln variance",
+    x = "",
+    y = ""
+  ) +
+  theme(
+    text = element_text(size = 15),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 10),
+    legend.title.align = 0.5,
+    legend.position = "bottom",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.line = element_line(color = "transparent")) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig S5 - individ_spp_tilemap_var_per1_7_10_-4_-0.5lines_trans-1.4.log.jpg", width = 7, height = 10, dpi = 300)
+```
+# Map mean _variance_ for all species individually - period 2
+```{r}
+na +
+  geom_tile(
+    aes(x = lon, y = lat, fill = log(var.two_med)),
+    #alpha = .7,
+    data = syncdif.spp.map
+  ) +
+  viridis::scale_fill_viridis(option = "inferno", limits = c(log(min(syncdif.spp.map$var.two_med)), log(max(syncdif.spp.map$var.one_med)))) +
+  theme_classic() +
+  facet_wrap( ~ fullsp2, ncol = 4) +
+  labs(
+    fill = "Ln variance",
+    x = "",
+    y = ""
+  ) +
+  theme(
+    text = element_text(size = 15),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 10),
+    legend.title.align = 0.5,
+    legend.position = "bottom",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.line = element_line(color = "transparent")) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig S6 - individ_spp_tilemap_var_per2_7_10_-4_-0.5lines_trans-1.4log.jpg", width = 7, height = 10, dpi = 300)
+```
+
+# Map change in variance for all species individually
+```{r}
+na +
+  geom_tile(
+    aes(x = lon, y = lat, fill = 100*var.dif_med/var.one_med),
+    data = syncdif.spp.map
+  ) +
+  scale_fill_distiller(palette = "RdYlBu", limits = c(-100, 100)) + 
+  theme_classic() +
+  facet_wrap( ~ fullsp2, ncol = 4) +
+  labs(
+    fill = "% change\nvar.",
+    x = "",
+    y = ""#,
+  ) +
+  theme(
+    text = element_text(size = 15),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks = element_blank(),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 10),
+    legend.title.align = 0.5,
+    legend.position = "bottom",
+    legend.title = element_text(size = 8),
+    legend.text = element_text(size = 8),
+    axis.line = element_line(color = "transparent")) +
+  geom_point(
+    aes(y = lat, x = lon),
+    alpha = .7,
+    color = "black",
+    shape = "+",
+    size = 1.5,
+    #    stroke = 1.5,
+    data = filter(syncdif.spp.map, 100*var.dif_p5/var.one_p5 > 0)
+  ) +
+  geom_point(
+    aes(y = lat, x = lon),
+    alpha = .7,
+    color = "white",
+    shape = "-",
+    size = 1.5,
+    #    stroke = 1.5,
+    data = filter(syncdif.spp.map, 100*var.dif_p95/var.one_p95 < 0)
+  ) +
+  theme(panel.spacing.y = unit(-0.5, "lines"),
+        panel.spacing.x = unit(-4, "lines"),
+        panel.background = element_rect(fill = "transparent", colour = NA),
+        plot.background = element_rect(fill = "transparent", colour = NA),
+        strip.text=element_text(vjust=-1.4))
+ggsave("figures/Fig Sy - var.dif_tilemap_REV2_7_10_-4_-0.5lines_trans-1.4pct.jpg", width = 7, height = 10, dpi = 300)
+```
+
 
 
 # Map median synchrony for a single species and time period (to make GIFs)
@@ -793,6 +1139,112 @@ na.blank +
   ) 
 #ggsave("figures/mean_change_all_iterations_linear_p95_red_bcr.png")
 ```
+
+# Create forest plot of correlations between synchrony and mean/variance/trends
+```{r} 
+cor.data = syncdif.spp.sum %>%
+  select(fullsp,
+         med = mean.dif.cor_med,
+         p5 = mean.dif.cor_p5,
+         p95 = mean.dif.cor_p95) %>%
+  bind_rows(
+    select(
+      syncdif.spp.sum,
+      fullsp,
+      med = var.dif.cor_med,
+      p5 = var.dif.cor_p5,
+      p95 = var.dif.cor_p95
+    )
+  ) %>%
+  bind_rows(
+    select(
+      syncdif.spp.sum,
+      fullsp,
+      med = trend.dif.cor_med,
+      p5 = trend.dif.cor_p5,
+      p95 = trend.dif.cor_p95
+    )
+  ) %>%
+  mutate(metric = c(rep("ΔAbundance", 20), rep("ΔVariance", 20), rep("ΔTrend", 20)))
+
+cor.data.sum = cor.data %>%
+  filter(fullsp != "All species") %>%
+  group_by(metric) %>%
+  summarise(
+    mean = mean(med),
+    sd = sd(med),
+    n = length(med),
+    se = sd / sqrt(n)
+  ) %>%
+  ungroup()
+  
+cor.data.sum %>%
+  ggplot() +
+  geom_hline(yintercept = 0,
+             linetype = 2,
+             color = "darkgray") +
+  geom_errorbar(
+    aes(
+      x = metric,
+      ymin = mean - 2 * se,
+      ymax = mean + 2 * se
+    ),
+    position = position_dodge(width = 1),
+    width = 0
+  ) +
+  geom_point(
+    aes(x = metric, y = mean),
+    position = position_dodge(width = 1),
+    size = 4.5,
+    color = "firebrick"
+  ) +
+  scale_y_continuous(limits = c(-0.3, 0.3)) +
+  cowplot::theme_cowplot() +
+  labs(x = "", y = "Correlation with\nchange in spatial synchrony")
+ggsave("figures/correlation_with_abund_variance.jpg")
+```
+
+```{r}
+syncdif.spp.map %>%
+  filter(spcode %in% c("bobo", "vesp")) %>%
+  ggplot() +
+  geom_point(aes(x = mean.one_med, y = sync.one_med)) +
+  facet_wrap(~fullsp)
+
+
+
+```
+```{r}
+# grid cells to include
+
+include = syncdif.spp.map %>%
+  select(spcode, grid) %>%
+  distinct() %>%
+  arrange(spcode, grid) %>%
+  mutate(include = 1)
+
+# note: ran bbs_posteriors.R script on cluster to produce this csv
+bbs.df = read.csv("scripts//amarel//bbs_posteriors.csv") %>%
+  mutate(Year0 = Year, Year = c(rep(1968:1993, 1513), rep(1994:2019, 1747)),
+         Bayes.n = as.numeric(Bayes.n)) %>%
+  rename(grid = Stratum) %>% 
+  group_by(sp, grid, startyr) %>%
+  mutate(r.n = resid(lm(Bayes.n~Year))) %>%
+  ungroup() %>%
+  left_join(include, by = c("sp" = "spcode", "grid")) %>%
+  filter(include == 1) %>%
+  arrange(sp, grid, Year) %>%
+  select(spcode = sp, grid, year = Year, Bayes.n)
+
+bbs.df %>%
+  filter(spcode == "bais") %>%
+  ggplot() +
+  geom_line(aes(x = year, y = Bayes.n, color = grid)) +
+  geom_vline(aes(xintercept = 1994))
+
+```
+
+
 
 # Links to data sources, code, papers, etc.
 1. List of grassland bird species: https://www.mbr-pwrc.usgs.gov/bbs/grass/actlist.htm. Citation: Sauer, J. R., B. G. Peterjohn, S. Schwartz, and J. E. Hines. 1995. The Grassland Bird Home Page. Version 95.0. Patuxent Wildlife Research Center, Laurel, MD

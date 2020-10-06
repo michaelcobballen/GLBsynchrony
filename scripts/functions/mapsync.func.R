@@ -285,7 +285,7 @@ if (other.metrics == T) {
       mean.mean = mean(mean),
       mean.var = mean(var),
       mean.trend = mean(trend),
-      n.grids.per.mean = length(grid) # for mean correlations (others include center cell, so = + 1)
+      n.grids.per.mean = length(grid)-1 # for mean correlations (others include center cell, so = + 1)
     ) %>%
     ungroup() %>%
     mutate(grid = as.character(grid)) %>%
@@ -296,7 +296,7 @@ if (other.metrics == T) {
   mapsync = mapsync_step1 %>%
     group_by(iteration, grid) %>%
     summarise(meancor.lin = mean(lin.cor, na.rm = T),
-              n.grids.per.mean = length(grid)) %>% # for mean correlations (others include center cell, so = + 1)) %>%
+              n.grids.per.mean = length(grid)-1) %>% # for mean correlations (others include center cell, so = + 1)) %>%
     ungroup() %>%
     mutate(grid = as.character(grid)) %>%
     filter(n.grids.per.mean > 1) %>%

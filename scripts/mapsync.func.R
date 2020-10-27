@@ -1,5 +1,5 @@
-# Note: this code may run quicker when not packaged into a function for some reason
-# Note: parallel processing speeded it up, but stopped working correctly somewhere along the line (weird values)
+# Function to create "n.iter" data sets based on random draws 
+# from the BBS index posterior distributions
 
 mapsync = function(spcode,
                    startyr,
@@ -11,7 +11,7 @@ mapsync = function(spcode,
                    uncertainty = T,
                    # logical indicating whether to use the whole posterior or just the median value per grid cell / year
                    maxzeros = 5,
-                   other.metrics = F, # logical indicating whether to calculate mean abundance, mean variance, mean trend in addition to mean synchrony
+                   other.metrics = F, # logical indicating whether to calculate mean abundance and mean variance in addition to mean synchrony
                    posterior.data.loc = "data/index_posteriors/",
                    jags.data.loc = "data/jags/",
                    save.to = "data/mapsync_iterations/") {
@@ -73,7 +73,7 @@ chooserand = function(colnum) {
   }
 
 makelots = function(){  
-  makeone.list = lapply(4:(n.year+3), chooserand)  # n.year number of years; chooses random column value for each year
+  makeone.list = lapply(3:(n.year+2), chooserand)  # n.year number of years; chooses random column value for each year
   makeone = data.frame(do.call("cbind", makeone.list))
   return(makeone)
 }
@@ -81,7 +81,7 @@ makelots = function(){
 
 # function to calculate median posterior values if uncertainty == F
 if(uncertainty == F){
-  getmed = function(x) {apply(x[,4:ncol(x)], 2L, median)}
+  getmed = function(x) {apply(x[,3:ncol(x)], 2L, median)}
   makelots = function(){
     makeone.list = lapply(post.split, getmed)
     makeone = data.frame(do.call("cbind", makeone.list))
@@ -111,7 +111,7 @@ lots.df.split = split(lots.df, lots.df$iteration)
 lin.func = function(x) {
   lots.c = as.numeric(do.call("rbind", x[1:(ncol(x)-2)])) 
   lots.mat = matrix(lots.c, ncol = (ncol(x)-2), byrow = T) 
-  lots.lin = apply(lots.mat, 2L, function(y) resid(lm(y~c(1:26))))
+  lots.lin = apply(lots.mat, 2L, function(y) resid(lm(y~c(1:n.year))))
   return(lots.lin)
 }
 
@@ -136,16 +136,6 @@ if(other.metrics == T) {
   
   var.list <- lapply(lin.list, var.func)
   
-  # a function to extract the linear trend coefficient from each time series
-  trend.func = function(x) {
-    lots.c = as.numeric(do.call("rbind", x[1:(ncol(x) - 2)]))
-    lots.mat = matrix(lots.c, ncol = (ncol(x) - 2), byrow = T)
-    lots.trend = apply(lots.mat, 2L, function(y)
-      coef(lm(y ~ c(1:26)))[2])
-    return(matrix(lots.trend, 1, n.grid))
-  }
-  
-  trend.list <- lapply(lots.df.split, trend.func)
 }
 
 # create correlation matrix among all grid cells (of linear detrended time series)
@@ -169,11 +159,6 @@ if(other.metrics == T){
     mutate(name = rep(unique(post$grid),n.iter)) %>%
     rename(var = value, grid = name)
 
-  trend.df = as.data.frame(do.call("rbind", trend.list)) %>%
-    mutate(iteration = 1:n.iter) %>%
-    pivot_longer(cols = 1:n.grid) %>%
-    mutate(name = rep(unique(post$grid),n.iter)) %>%
-    rename(trend = value, grid = name)
 }
 
 # combine all matrices into a "long" data.frame with grid labels
@@ -245,11 +230,7 @@ if (other.metrics == T) {
     left_join(var.df, by = c("gridA" = "grid", "iteration")) %>%
     rename(varA = var) %>%
     left_join(var.df, by = c("gridB" = "grid", "iteration")) %>%
-    rename(varB = var) %>%
-    left_join(trend.df, by = c("gridA" = "grid", "iteration")) %>%
-    rename(trendA = trend) %>%
-    left_join(trend.df, by = c("gridB" = "grid", "iteration")) %>%
-    rename(trendB = trend)
+    rename(varB = var)
 }
 
 # create sets of adjacent cells within 400 km ("grid" being the focal cell)
@@ -269,14 +250,12 @@ if (other.metrics == T) {
       mean = case_when(grid == gridA ~ meanB,
                        TRUE ~ meanA),
       var = case_when(grid == gridA ~ varB,
-                      TRUE ~ varA),
-      trend = case_when(grid == gridA ~ trendB,
-                        TRUE ~ trendA)
+                      TRUE ~ varA)
     ) %>%
-    dplyr::select(-meanA, -meanB, -varA, -varB, -trendA, -trendB)
+    dplyr::select(-meanA, -meanB, -varA, -varB)
 }
 
-# create 400 km moving window average of synchrony, abundance, variance, trend
+# create 400 km moving window average of synchrony, abundance, variance
 if (other.metrics == T) {
   mapsync = mapsync_step1 %>%
     group_by(iteration, grid) %>%
@@ -284,7 +263,6 @@ if (other.metrics == T) {
       meancor.lin = mean(lin.cor, na.rm = T),
       mean.mean = mean(mean),
       mean.var = mean(var),
-      mean.trend = mean(trend),
       n.grids.per.mean = length(grid)-1 # for mean correlations (others include center cell, so = + 1)
     ) %>%
     ungroup() %>%
@@ -304,12 +282,12 @@ if (other.metrics == T) {
     arrange(iteration, grid)
 }
 
-# write csv for iterations method (uncertainty == T)
+# write csv of all 3000 resampled data sets ("iterations method") if "uncertainty == T"
 if(uncertainty==T){
 write.csv(mapsync, paste0(save.to, spcode,".",substr(startyr,3,4),".", substr(endyr,3,4),".mapsync.iterations.csv"), row.names=FALSE)
 }
 
-# write csv for "median posterior" method (uncertainty == F)
+# write csv for one data set ("posterior medians only") if "uncertainty == F"
 if(uncertainty==F){
 write.csv(mapsync, paste0(save.to, spcode,".",substr(startyr,3,4),".", substr(endyr,3,4),".mapsync.medians.csv"), row.names=FALSE)
 }

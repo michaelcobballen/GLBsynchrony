@@ -61,6 +61,6 @@ gridcollapse = function(species, spcode, startyr, endyr, save.loc = "data/jags/"
   
 # export to csv for use in Amarel cluster script
 
-  write.csv(data, paste0(save.loc, spcode, ".", substr(startyr,3,4), ".", substr(endyr,3,4), ".jags.csv"))
+  write.csv(data, paste0(save.loc, spcode, ".", substr(startyr,3,4), ".", substr(endyr,3,4), ".jags.csv"), row.names = FALSE)
 }
 

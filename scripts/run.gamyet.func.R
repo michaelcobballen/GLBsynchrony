@@ -1,7 +1,7 @@
 # Function to run the jagsUI model and jags_data exported from bbsBayes package
 # (1x1 degree grid cell strata were first merged into 2x2 cells)
-# (then jags_data was packaged into a csv to allow use of Amarel cluster)
-# (bbsBayes package won't install on the cluster)
+# (then jags_data was packaged into a csv to allow use of super computing cluster)
+# (this was done as bbsBayes package wouldn't install on the cluster)
 
 run.gamyet = function(spcode,
                       species,
@@ -12,10 +12,10 @@ run.gamyet = function(spcode,
                       iter = 30000,
                       thin = 10,
                       par = T,
-                      gamyet.loc = "scripts/jags/gamyet.bug",
+                      gamyet.loc = "scripts/gamyet.bug",
                       data.loc = "data/jags/",
                       save.posteriors = "data/index_posteriors/",
-                      save.rawcounts = "data/raw_counts") {
+                      warnings = F) {
   
 #####################################
 #### # load libraries
@@ -263,8 +263,8 @@ is.odd <- function(x) x %% 2 != 0
   dimnames(data_list$n) <- list(1:npost, strat_table$Stratum, startyr:endyr) 
   n = apply(data_list$n, 3L, c)
   
-  # create summary raw count data
-  raw.data = data_list$original_data %>%
+  # create summary of mean raw count data
+  raw.data.warnings = data_list$original_data %>%
     group_by(Stratum, Year) %>%
     summarize(mean.count = mean(Count), n.routes = length(Count)) %>%
     ungroup() %>%
@@ -282,6 +282,38 @@ n
 #####################################
 #### save results to csv files
 #####################################
-write.csv(model.output, paste0(save.posteriors, spcode, ".", substr(startyr,3,4),".",substr(endyr,3,4),".index.posteriors.csv"))
-write.csv(raw.data, paste0(save.rawcounts, spcode, ".", substr(startyr,3,4), ".", substr(endyr,3,4),".rawcount.warnings.csv"))
+  
+# write index posterior draws to csv file
+write.csv(
+  model.output,
+  paste0(
+    save.posteriors,
+    spcode,
+    ".",
+    substr(startyr, 3, 4),
+    ".",
+    substr(endyr, 3, 4),
+    ".index.posteriors.csv"
+  ),
+  row.names = FALSE
+)
+
+# if "warnings == T", write csv of mean raw counts per grid & convergence warnings
+
+if (warnings == T) {
+  write.csv(
+    raw.data.warnings,
+    paste0(
+      save.posteriors,
+      spcode,
+      ".",
+      substr(startyr, 3, 4),
+      ".",
+      substr(endyr, 3, 4),
+      ".rawcount.warnings.csv"
+    ),
+    row.names = FALSE
+  )
+}
+
 }

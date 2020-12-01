@@ -2,12 +2,11 @@
 .Rhistory
 .RData
 .Ruserdata
-old/
 random/
 writing/
 mapping/
-data/
+data/index_posteriors/
+data/old_data/
 figures/
-data/
 scripts/amarel/
-scripts/old_scripts
+scripts/old_scripts/

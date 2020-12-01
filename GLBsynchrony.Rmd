@@ -1,11 +1,11 @@
 ---
-title: "Code and data for: 'Mapping shifts in spatial synchrony in North American grassland birds to inform conservation planning'"
-author: "Mike Allen"
-date: "October 27, 2020"
+title: "Code and data for: 'Mapping shifts in spatial synchrony in grassland birds to inform conservation planning'"
+author: "Mike Allen and Julie Lockwood"
+date: "December 1, 2020"
 output: html_document
 ---
 # Section 0. README
-This code (along with associated scripts "gridcollapse.func.R", "run.gamyet.func.R", and "mapsync.func.R") can be used to reproduce the analyses and figures from the associated manuscript (Allen & Lockwood 2020). It processes route-level North American Breeding Bird Survey count data summarized into 2x2 degree grid-cells to analyze spatial synchrony for 19 species of grassland birds. It relies heavily on data and code provided within the bbsBayes package (Edwards & Smith 2020; version 2.3.3.2020) and a Bayesian hierarchical model implemented within that package and described in Smith and Edwards (2020). 
+This code (i.e., the GLBsynchrony.Rmd file along with associated scripts "gridcollapse.func.R", "run.gamyet.func.R", and "mapsync.func.R") can be used to reproduce the analyses and figures from the associated manuscript (Allen & Lockwood 2020). It processes route-level North American Breeding Bird Survey count data summarized into 2x2 degree grid-cells to analyze spatial synchrony for 19 species of grassland birds. It relies heavily on data and code provided within the bbsBayes package (Edwards & Smith 2020; version 2.3.3.2020) and a Bayesian hierarchical model implemented within that package and described in Smith and Edwards (2020). 
 
 IMPORTANT NOTE: this code uses North American Breeding Bird Survey data (Pardieck et al. 2020) that must be accessed through the BBSbayes package (Edwards & Smith 2020). The code was most recently tested on 2020-10-27 with R version 4.0.2 (2020-06-22), RStudio version 1.3.1056, and bbsBayes version 2.3.3.2020. Version information for other packages are provided in the comments of Section 1 and full session info is provided in Section 8 below.
 
@@ -50,7 +50,6 @@ Sections
 8. Package versions and session info
 
 # Section 1. Load libraries, functions, data
-
 ## 1.1 Load packages, functions, & species data
 We started with 30 grassland-specialist species listed in Sauer et al. (1995). Eleven species did not have enough data for synchrony analysis after processing (see Supporting Information in Allen & Lockwood 2020).
 ```{r, warning = F}
@@ -219,6 +218,7 @@ na.blank <- ggplot() +
 
 rm(canada.fort)
 ```
+
 # Section 2. Setup and run JAGS model to generate BBS indices
 ## 2.1. Access BBS data via bbsBayes package
 You only need to run this code once. You'll need to accept the terms of use.
@@ -251,7 +251,6 @@ for (i in 1:nrow(species)) {
 #  save.loc = "data/jags/" # where to write .csv file
 #)
 ```
-
 ## 2.3. Run Jags models to generate BBS indices
 This code runs the Bayesian hierarchical model to generate BBS indices for each species/grid/year combination. The model is the General Additive Model with Year (heavy-tailed option) from the bbsBayes package (Edwards & Smith 2020, Smith & Edwards 2020). These can take ~1-15+ hrs for each species/period (running on 3 cores in parallel) depending on how widespread the species is (e.g., on the author's laptop, Baird's Sparrow took ~45 min, while Savannah Sparrow took 10-15 hours). We ran the models in parallel on the Rutgers Amarel supercomputer cluster (https://oarc.rutgers.edu). MCMC parameters can be customized by using the chains, iter, burn, and thin arguments (currently they are set at the bbsBayes defaults).
 ```{r}
@@ -285,6 +284,7 @@ run.gamyet(
 #             )
 #}
 ```
+
 # Section 3. Computing mean spatial synchrony by species and grid cell
 ## 3.1 Compute mean spatial synchrony (r)
 Setting other.metrics to "F" computes synchrony metrics (mean r) only; setting this to "T" also computes mean abundance and detrended variance for cells. The former is quicker. Setting uncertainty to "T" computes the metrics numerous times (set using "n.iter") on data sets created by resampling from the posterior distributions; setting it to "F" only computes them once using the median values of the posteriors. The latter is quicker. For reference, this function took ~15 minutes for a widespread species (Savannah Sparrow) on the author's laptop with all.methods = F and uncertainty = T. The resulting csv files of mean correlations saves to the location indicated by "save.to".
@@ -326,8 +326,8 @@ mapsync(
 #  )
 #}
 ```
-# Section 4. Summarize spatial synchrony data for mapping and analysis
 
+# Section 4. Summarize spatial synchrony data for mapping and analysis
 ## 4.1. Read in files with mean synchrony data (mean synchrony calculated from many resampled data sets from the BBS index posterior distributions)
 Synchrony iterations were generated based on 3000 data sets from random draws of the BBS index posterior distributions (3000 for each species/grid cell/year). Computed mean r for each species/cell for each data set, resulting in a distribution of synchrony and synchrony difference estimates for each species/cell/year.
 ```{r}
@@ -397,7 +397,6 @@ for (i in 1:numsp) {
 }
 
 rm(mapsync.files, mapsync.loc, grid.common, grid.common2, mapsync.iterations)
-
 ```
 ## 4.2. Average grid cells across species
 ```{r}
@@ -645,6 +644,7 @@ syncdif.spp.map = syncdif.spp.map %>%
 
 rm(syncdif.spp.prep, syncdif.spp, syncdif, syncdif.all, var.list)
 ```
+
 # Section 5. Create figures in the manuscript body
 # 5.1. Figure 2. Forest plot of synchrony change by species
 ```{r} 
@@ -677,7 +677,7 @@ syncdif.spp.sum %>%
   scale_fill_distiller(name = "Mean\nchange",
                        palette = "RdYlBu",
                        limits = c(-0.105, 0.21)) +
-  labs(x = 'Change in spatial synchrony, 1968-1993 vs. 1994-2019', y = "") +
+  labs(x = 'Change in spatial synchrony', y = "") +
   annotate(
     "text",
     x = 0.48,
@@ -691,8 +691,10 @@ syncdif.spp.sum %>%
     "text",
     x = 0.43,
     y = nrow(dotplot_n),
+#    label="italic(n)", parse=TRUE,
     label = "n = ",
-    color = "gray25"
+    color = "gray25",
+    fontface = "italic"
   ) +
   annotate(
     "text",
@@ -731,7 +733,7 @@ syncdif.spp.sum %>%
     axis.text = element_text(size = 12, color = "black"),
     axis.title = element_text(size = 12, color = "black")
   )
-# ggsave("Figure_2.tiff", dpi = 600)
+# ggsave("Fig_2_dotplot_color.tiff", dpi = 600)
 ```
 ## 5.2. Figure 3. Map change in synchrony for all species individually
 ```{r}
@@ -765,20 +767,31 @@ na +
   ) +
   geom_point(
     aes(y = lat, x = lon),
-    alpha = .7,
+    alpha = 1, 
     color = "black",
     shape = "+",
     size = 1.5,
+    stroke = 2,
     data = filter(syncdif.spp.map, sync.dif_p2.5 > 0)
   ) +
   geom_point(
     aes(y = lat, x = lon),
-    alpha = .7,
+    alpha = 1, 
+    color = "black",
+    shape = "-",
+    size = 2.5,
+    stroke = 2,
+    data = filter(syncdif.spp.map, sync.dif_p97.5 < 0)
+  ) +  
+  geom_point(
+    aes(y = lat, x = lon),
+    alpha = 1, 
     color = "white",
     shape = "-",
     size = 1.5,
+    stroke = 2,
     data = filter(syncdif.spp.map, sync.dif_p97.5 < 0)
-  ) +
+  ) +  
   theme(
     panel.spacing.y = unit(-0.5, "lines"),
     panel.spacing.x = unit(-4, "lines"),
@@ -786,7 +799,7 @@ na +
     plot.background = element_rect(fill = "transparent", colour = NA),
     strip.text = element_text(vjust = -1.4)
   )
-# ggsave("Figure_3.tiff", width = 7, height = 10, dpi = 600)
+ ggsave("Fig_3.tiff", width = 7, height = 10, dpi = 600)
 ```
 ## 5.3. Figure 4. Map mean change in synchrony for all species combined
 ```{r}
@@ -834,9 +847,8 @@ na.blank +
   )
 #ggsave("Figure_4.tiff", dpi = 600)
 ```
-
 ## 5.4. Raster map of mean synchrony change to make a shapefile for Geoda
-This step is intermediate to creating the 'hotspot' polygon shapes in Figure 4. The analysis was performed in the Geoda program (see manuscript).
+This step is intermediate to creating the 'hotspot' polygon shapes in Figure 4b. The analysis was performed in the Geoda program (see manuscript) and the polygon map (pannel b) was made in QGIS.
 ```{r}
 # Make a grid of spatial polygons to match up with meansyncdiff data
 rr <- raster::raster(ext = raster::extent(-177, -52, 24, 69), res=c(2,2))
@@ -1178,7 +1190,7 @@ gg = gridExtra::arrangeGrob(abund.pct.plot,
 
 # Section 7. References
 
-Allen MC, Lockwood JL. 2020. Mapping shifts in spatial synchrony in North American grassland birds to inform conservation planning. Conservation Biology. doi: 10.1111/cobi.13662.
+Allen MC, Lockwood JL. 2020. Mapping shifts in spatial synchrony in grassland birds to inform conservation planning. Conservation Biology. doi: 10.1111/cobi.13662.
 
 Edwards BPM, Smith AC. 2020. bbsBayes: An R Package for Hierarchical
 Bayesian Analysis of North American Breeding Bird Survey Data. bioRxiv

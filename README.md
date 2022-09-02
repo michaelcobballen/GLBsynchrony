@@ -55,3 +55,5 @@ Pardieck KL, Ziolkowski Jr. DJ, Lutmerding M, Aponte VI, Hudson M-AR. 2020. Nort
 U.S. Geological Survey data release, https://doi.org/10.5066/P9J6QUF6.
   
 Smith AC, Edward BPM. 2020. Improved status and trend estimates from the North American Breeding Bird Survey using a Bayesian hierarchical generalized additive model. bioRxiv:2020.03.26.010215. 
+
+The version used in the publication (v1.0.0) is archived on Zenodo: [![DOI](https://zenodo.org/badge/161780440.svg)](https://zenodo.org/badge/latestdoi/161780440) and also on OSF: https://osf.io/zrdcy/ . The OSF version has additional output files (csv files containing the full posterior samples).
